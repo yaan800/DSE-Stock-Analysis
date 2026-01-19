@@ -82,3 +82,29 @@ def add_minervini_stage2(df):
     )
 
     return df
+
+
+# -------------------------------------------------
+# Convert Daily to Weekly (OHLCV)
+# -------------------------------------------------
+def to_weekly(df):
+    df = df.sort_values("Date").copy()
+
+    weekly = (
+        df
+        .set_index("Date")
+        .resample("W-FRI")
+        .agg({
+            "Open": "first",
+            "High": "max",
+            "Low": "min",
+            "Close": "last",
+            "Volume": "sum"
+        })
+        .dropna()
+        .reset_index()
+    )
+
+    weekly["Ticker"] = df["Ticker"].iloc[0]
+    return weekly
+
