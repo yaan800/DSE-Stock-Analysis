@@ -1,37 +1,43 @@
 import streamlit as st
-from utils import read_excel_safely, process_sheet, merge_today_data
-import pandas as pd
+from utils import read_excel_safely, process_sheet, bollinger_signal, minervini_stage2
 
-st.set_page_config(page_title="DSE Excel Upload Analyzer", layout="wide")
+st.set_page_config(page_title="DSE Excel Analyzer", layout="wide")
 st.title("📊 DSE Stock Analysis – Excel Upload Version")
 
 # -------------------
-# Step 1: Upload Historical Data
+# Step 1: Upload Excel
 # -------------------
-historical_file = st.file_uploader("Upload Historical Excel File", type="xlsx")
-all_data = pd.DataFrame()
+uploaded_file = st.file_uploader("Upload Historical Excel File", type="xlsx")
 
-if historical_file:
-    all_sheets = read_excel_safely(historical_file)
-    if all_sheets:
-        st.success(f"Found {len(all_sheets)} sheets in historical file.")
+all_sheets = {}
+if uploaded_file:
+    all_sheets, error = read_excel_safely(uploaded_file)
+    if error:
+        st.error(error)
+    elif all_sheets:
+        st.success(f"Found {len(all_sheets)} sheets.")
+        sheet_names = list(all_sheets.keys())
 
-        # Preview first sheet
-        first_sheet = list(all_sheets.keys())[0]
-        df_first = process_sheet(all_sheets[first_sheet])
-        if df_first is not None:
-            st.subheader(f"Preview of first sheet: {first_sheet}")
-            st.dataframe(df_first.head(20))
-            all_data = pd.concat([process_sheet(df) for df in all_sheets.values() if process_sheet(df) is not None], ignore_index=True)
+        # -------------------
+        # Step 2: Choose Sheet
+        # -------------------
+        selected_sheet = st.selectbox("Select a sheet to view", sheet_names)
+        df = process_sheet(all_sheets[selected_sheet])
+        if df is None:
+            st.warning("Selected sheet has too few columns or invalid format.")
+        else:
+            st.subheader(f"Preview – {selected_sheet}")
+            st.dataframe(df.tail(50))
 
-# -------------------
-# Step 2: Upload Today's Data
-# -------------------
-today_file = st.file_uploader("Upload Today's Excel/CSV", type=['xlsx','csv'])
-if today_file and not all_data.empty:
-    all_data = merge_today_data(all_data, today_file)
-    st.success("Merged today's data with historical data!")
+            # -------------------
+            # Step 3: Calculations
+            # -------------------
+            if st.checkbox("Apply Bollinger Band Signals"):
+                df = bollinger_signal(df)
+                st.subheader("Bollinger Band Signals")
+                st.dataframe(df[['Ticker','Date','Close','BB_upper','BB_lower','BB_signal']].tail(50))
 
-if not all_data.empty:
-    st.subheader("Combined Dataset Preview")
-    st.dataframe(all_data.head(50))
+            if st.checkbox("Apply Minervini Stage 2 Filter"):
+                df = minervini_stage2(df)
+                st.subheader("Stage 2 Signals")
+                st.dataframe(df[['Ticker','Date','Close','Stage2']].tail(50))
