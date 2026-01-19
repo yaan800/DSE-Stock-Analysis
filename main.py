@@ -11,7 +11,7 @@ st.title("📊 DSE Stock Analysis Dashboard")
 uploaded_file = st.file_uploader("Upload your DSE OHLCV Excel sheet", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
-    all_data = get_dse_data(uploaded_file)
+    all_data, ticker_col = get_dse_data(uploaded_file)
     tickers = list(all_data.keys())
     st.sidebar.write(f"✅ Loaded {len(tickers)} tickers")
 
@@ -34,7 +34,7 @@ if uploaded_file:
     # ---------------------------
     scheduler = BackgroundScheduler()
     scheduler.add_job(
-        lambda: send_volume_alert(all_data),
+        lambda: send_volume_alert(all_data, ticker_col),
         'cron',
         hour=[11,12,13,14],
         minute=0,
@@ -42,5 +42,6 @@ if uploaded_file:
     )
     scheduler.start()
     st.success("✅ Volume alert scheduler is running (11 AM, 12 PM, 1 PM, 2 PM BD Time)")
+
 else:
     st.info("Please upload an Excel sheet to start analysis.")
