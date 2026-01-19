@@ -9,27 +9,22 @@ from datetime import datetime
 # ---------------------------
 def get_dse_data(uploaded_file):
     """
-    Reads uploaded Excel with columns like:
-    Ticker | Date | Open | High | Low | Close | Volume
-    Automatically detects ticker column (case-insensitive, strips spaces)
+    Reads uploaded Excel without headers.
+    Assigns default column names:
+    Ticker, Date, Open, High, Low, Close, Volume
     """
-    df = pd.read_excel(uploaded_file)
+    df = pd.read_excel(uploaded_file, header=None)  # <- no header in file
 
-    # Force all column names to string and strip spaces
-    df.columns = df.columns.astype(str).str.strip()
+    # Assign column names
+    df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
-    # Detect Ticker column
-    ticker_col = None
-    for col in df.columns:
-        if str(col).lower() == 'ticker':  # ensure col is string
-            ticker_col = col
-            break
-    if ticker_col is None:
-        raise ValueError("Uploaded Excel must have a 'Ticker' column!")
+    # Strip strings just in case
+    df['Ticker'] = df['Ticker'].astype(str).str.strip()
 
-    tickers = df[ticker_col].unique()
-    all_data = {t: df[df[ticker_col]==t].copy() for t in tickers}
-    return all_data, ticker_col
+    tickers = df['Ticker'].unique()
+    all_data = {t: df[df['Ticker']==t].copy() for t in tickers}
+    return all_data, 'Ticker'
+
 
 # ---------------------------
 # Minervini Stage 2 Placeholder
