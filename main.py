@@ -1,32 +1,37 @@
 import streamlit as st
-from utils import read_excel_safely, process_sheet
+from utils import read_excel_safely, process_sheet, merge_today_data
+import pandas as pd
 
-st.set_page_config(page_title="DSE Multi-Sheet Analyzer", layout="wide")
-st.title("📊 DSE Multi-Sheet Excel Analyzer")
+st.set_page_config(page_title="DSE Excel Upload Analyzer", layout="wide")
+st.title("📊 DSE Stock Analysis – Excel Upload Version")
 
-uploaded_file = st.file_uploader("Upload your Excel file", type=['xlsx'])
+# -------------------
+# Step 1: Upload Historical Data
+# -------------------
+historical_file = st.file_uploader("Upload Historical Excel File", type="xlsx")
+all_data = pd.DataFrame()
 
-if uploaded_file:
-    st.info("Reading Excel file...")
-    all_sheets = read_excel_safely(uploaded_file)
+if historical_file:
+    all_sheets = read_excel_safely(historical_file)
+    if all_sheets:
+        st.success(f"Found {len(all_sheets)} sheets in historical file.")
 
-    if not all_sheets:
-        st.error("No valid sheets found in the Excel file.")
-    else:
-        st.success(f"Found {len(all_sheets)} sheets.")
+        # Preview first sheet
+        first_sheet = list(all_sheets.keys())[0]
+        df_first = process_sheet(all_sheets[first_sheet])
+        if df_first is not None:
+            st.subheader(f"Preview of first sheet: {first_sheet}")
+            st.dataframe(df_first.head(20))
+            all_data = pd.concat([process_sheet(df) for df in all_sheets.values() if process_sheet(df) is not None], ignore_index=True)
 
-        sheet_to_view = st.selectbox("Select a sheet to preview", list(all_sheets.keys()))
+# -------------------
+# Step 2: Upload Today's Data
+# -------------------
+today_file = st.file_uploader("Upload Today's Excel/CSV", type=['xlsx','csv'])
+if today_file and not all_data.empty:
+    all_data = merge_today_data(all_data, today_file)
+    st.success("Merged today's data with historical data!")
 
-        if sheet_to_view:
-            df_raw = all_sheets[sheet_to_view]
-            df_processed = process_sheet(df_raw)
-
-            if df_processed is not None:
-                st.subheader(f"Preview of '{sheet_to_view}'")
-                st.dataframe(df_processed.head(20))
-
-                # Basic statistics
-                st.subheader("Summary Statistics")
-                st.write(df_processed.describe())
-            else:
-                st.warning("Could not process this sheet.")
+if not all_data.empty:
+    st.subheader("Combined Dataset Preview")
+    st.dataframe(all_data.head(50))
