@@ -1,28 +1,32 @@
 import streamlit as st
 from utils import get_dse_data
 
-st.set_page_config(page_title="DSE Stock Loader", layout="wide")
-st.title("📈 DSE Stock Analysis App")
+st.set_page_config(page_title="DSE Multi-Sheet Loader", layout="wide")
+st.title("📈 DSE Multi-Day Stock Analysis App")
 
-uploaded_file = st.file_uploader("Upload your DSE Excel/CSV file", type=["xlsx","csv"])
+uploaded_file = st.file_uploader("Upload your multi-sheet Excel file", type=["xlsx"])
 
 if uploaded_file is not None:
     try:
-        with st.spinner("Processing file..."):
+        with st.spinner("Processing all sheets..."):
             all_data, tickers_list = get_dse_data(uploaded_file)
-        st.success(f"✅ Successfully loaded {len(tickers_list)} tickers!")
+        st.success(f"✅ Loaded {len(tickers_list)} tickers across {len(all_data[tickers_list[0]])} sheets each!")
 
-        # Show first 10 tickers as a table
-        st.subheader("Sample Data (First 10 Tickers)")
-        for ticker in tickers_list[:10]:
-            st.write(f"**{ticker}**")
-            st.dataframe(all_data[ticker])
+        # Sample view: first ticker and first sheet
+        sample_ticker = tickers_list[0]
+        sample_sheet = list(all_data[sample_ticker].keys())[0]
+        st.subheader(f"Sample Data: {sample_ticker} | Sheet: {sample_sheet}")
+        st.dataframe(all_data[sample_ticker][sample_sheet])
 
-        # Optional: Select ticker to see details
-        selected = st.selectbox("Select a ticker to view full data", tickers_list)
-        st.dataframe(all_data[selected])
+        # Ticker selector
+        selected_ticker = st.selectbox("Select a ticker", tickers_list)
+        selected_sheet = st.selectbox(
+            "Select a date/sheet",
+            list(all_data[selected_ticker].keys())
+        )
+        st.dataframe(all_data[selected_ticker][selected_sheet])
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error processing Excel: {e}")
 else:
-    st.info("Please upload a file to continue.")
+    st.info("Please upload an Excel file to continue.")
