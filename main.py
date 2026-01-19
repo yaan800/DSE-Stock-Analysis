@@ -1,43 +1,46 @@
 import streamlit as st
-from utils import read_excel_safely, process_sheet, bollinger_signal, minervini_stage2
+from utils import get_dse_data, bollinger_signal, minervini_stage2, add_indicators
 
-st.set_page_config(page_title="DSE Excel Analyzer", layout="wide")
-st.title("📊 DSE Stock Analysis – Excel Upload Version")
+st.set_page_config(page_title="DSE Stock Analysis", layout="wide")
+st.title("DSE Stock Analysis - Option A")
 
-# -------------------
-# Step 1: Upload Excel
-# -------------------
-uploaded_file = st.file_uploader("Upload Historical Excel File", type="xlsx")
+# ---------------------------
+# Upload Excel
+# ---------------------------
+uploaded_file = st.file_uploader("Upload your full Excel file (all sheets)", type=["xlsx"])
 
-all_sheets = {}
 if uploaded_file:
-    all_sheets, error = read_excel_safely(uploaded_file)
-    if error:
-        st.error(error)
-    elif all_sheets:
-        st.success(f"Found {len(all_sheets)} sheets.")
-        sheet_names = list(all_sheets.keys())
+    # List available sheets
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_list = xls.sheet_names
+    selected_sheet = st.selectbox("Select Sheet (Date)", sheet_list)
 
-        # -------------------
-        # Step 2: Choose Sheet
-        # -------------------
-        selected_sheet = st.selectbox("Select a sheet to view", sheet_names)
-        df = process_sheet(all_sheets[selected_sheet])
-        if df is None:
-            st.warning("Selected sheet has too few columns or invalid format.")
-        else:
-            st.subheader(f"Preview – {selected_sheet}")
-            st.dataframe(df.tail(50))
+    try:
+        df = get_dse_data(uploaded_file, selected_sheet)
 
-            # -------------------
-            # Step 3: Calculations
-            # -------------------
-            if st.checkbox("Apply Bollinger Band Signals"):
-                df = bollinger_signal(df)
-                st.subheader("Bollinger Band Signals")
-                st.dataframe(df[['Ticker','Date','Close','BB_upper','BB_lower','BB_signal']].tail(50))
+        st.subheader(f"Data Preview: {selected_sheet}")
+        st.dataframe(df.head(10))
 
-            if st.checkbox("Apply Minervini Stage 2 Filter"):
-                df = minervini_stage2(df)
-                st.subheader("Stage 2 Signals")
-                st.dataframe(df[['Ticker','Date','Close','Stage2']].tail(50))
+        # ---------------------------
+        # Bollinger Bands
+        # ---------------------------
+        df_bb = bollinger_signal(df)
+        st.subheader("Bollinger Band Signals")
+        st.dataframe(df_bb[['Ticker', 'Date', 'Close', 'BB_lower', 'BB_upper', 'BB_buy', 'BB_sell']].tail(10))
+
+        # ---------------------------
+        # Minervini Stage 2
+        # ---------------------------
+        df_stage2 = minervini_stage2(df)
+        st.subheader("Minervini Stage 2 Screener")
+        st.dataframe(df_stage2[['Ticker', 'Date', 'Close', 'MA50', 'MA150', 'MA200', 'Stage2']].tail(10))
+
+        # ---------------------------
+        # Additional Indicators
+        # ---------------------------
+        df_ind = add_indicators(df)
+        st.subheader("Additional Indicators (RSI, MFI, EMA)")
+        st.dataframe(df_ind[['Ticker', 'Date', 'RSI14', 'MFI14', 'EMA9', 'EMA21', 'EMA50', 'EMA200']].tail(10))
+
+    except Exception as e:
+        st.error(f"Error processing sheet: {e}")
