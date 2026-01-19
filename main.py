@@ -1,32 +1,40 @@
 import streamlit as st
 import pandas as pd
-from utils import load_excel_data, add_bollinger, bollinger_lower_touch, add_minervini_stage2
+from utils import (
+    load_excel_data_filtered,
+    add_bollinger,
+    bollinger_lower_touch,
+    add_minervini_stage2
+)
 
 # -----------------------------
-# Streamlit App Title
+# App Title
 # -----------------------------
 st.title("DSE Stock Analysis - Option A")
-st.write("Upload your Excel file containing all DSE stock data.")
+st.write("Upload your Excel file containing all DSE stock data (first sheet = desired stocks).")
 
 # -----------------------------
-# Excel Upload
+# Upload Excel
 # -----------------------------
 uploaded_file = st.file_uploader("Upload DSE Excel file", type=["xls","xlsx"])
 
 if uploaded_file:
     try:
-        # Load data from all sheets
-        full_df = load_excel_data(uploaded_file)
-
-        # Show list of sheets for reference
+        # Load all sheet names
         xls = pd.ExcelFile(uploaded_file)
         sheet_list = xls.sheet_names
-        st.write(f"Found sheets: {sheet_list}")
-        selected_sheet = st.selectbox("Select Sheet to view", sheet_list)
-        
-        # Read only the selected sheet
-        sheet_df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None)
-        sheet_df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+
+        # First sheet = desired stocks
+        desired_stocks_df = pd.read_excel(uploaded_file, sheet_name=sheet_list[0], header=None, usecols="A")
+        desired_stocks = desired_stocks_df.iloc[:,0].dropna().tolist()
+        st.write(f"Desired Stocks ({len(desired_stocks)}):")
+        st.write(desired_stocks)
+
+        # Select sheet to analyze
+        selected_sheet = st.selectbox("Select Sheet (Date) for analysis", sheet_list[1:])
+
+        # Load only desired stocks from selected sheet
+        sheet_df = load_excel_data_filtered(uploaded_file, selected_sheet, desired_stocks)
 
         st.subheader(f"Data from sheet: {selected_sheet}")
         st.dataframe(sheet_df)
@@ -35,17 +43,15 @@ if uploaded_file:
         # Bollinger Bands
         # -----------------------------
         sheet_df = add_bollinger(sheet_df)
-
-        st.subheader("Full Dataset with Bollinger Bands")
+        st.subheader("Dataset with Bollinger Bands")
         st.dataframe(sheet_df)
 
         # -----------------------------
         # Minervini Stage 2
         # -----------------------------
         sheet_df = add_minervini_stage2(sheet_df)
-
-        st.subheader("Stocks Passing Minervini Stage 2 Conditions")
         minervini_stocks = sheet_df[sheet_df["Stage2"]==True]
+        st.subheader("Stocks Passing Minervini Stage 2")
         st.dataframe(minervini_stocks)
 
         # -----------------------------
