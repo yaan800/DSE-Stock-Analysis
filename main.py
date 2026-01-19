@@ -55,3 +55,19 @@ if uploaded_file:
             "Above BB Mid": latest["Close"] > latest["BB_MID"],
             "Stage 2": bool(latest["Stage2"])
         })
+# ---------------------------
+# Add Bollinger Bands to dataframe
+df = add_bollinger(df)
+
+# ---------------------------
+# Filter stocks touching or about to touch lower band
+threshold = 0.01  # 1% above lower band counts as "about to touch"
+bb_buy_mask = df["Close"] <= df["BB_LOWER"] * (1 + threshold)
+bb_buy_stocks = df[bb_buy_mask].copy()
+
+# Display in Streamlit
+if not bb_buy_stocks.empty:
+    st.subheader("Stocks touching / about to touch Lower Bollinger Band")
+    st.dataframe(bb_buy_stocks[["Ticker", "Date", "Close", "BB_LOWER", "Volume"]])
+else:
+    st.write("No stocks are near the lower Bollinger Band currently.")
