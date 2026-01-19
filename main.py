@@ -1,45 +1,46 @@
 import streamlit as st
-import pandas as pd
-from email.message import EmailMessage
 from apscheduler.schedulers.background import BackgroundScheduler
+from utils import get_dse_data, minervini_stage2, bollinger_signal, rel_strength, send_volume_alert
 
-# Custom utilities
-from utils import get_dse_data, minervini_stage2, bollinger_signal, rel_strength
-
-# ---------------------------
-# User Settings
-# ---------------------------
-TICKERS = ['GP', 'BATBC', 'SQUARE', 'ACI', 'RENATA']
+st.set_page_config(page_title="DSE Stock Analysis", layout="wide")
+st.title("📊 DSE Stock Analysis Dashboard")
 
 # ---------------------------
-# Streamlit App Layout
+# Upload Excel
 # ---------------------------
-st.title("DSE Stock Analysis Dashboard")
-st.sidebar.header("Settings")
-st.sidebar.write("Select tickers, signals, and view options here.")
+uploaded_file = st.file_uploader("Upload your DSE OHLCV Excel sheet", type=["xlsx", "xls", "csv"])
 
-# ---------------------------
-# Fetch Dummy Data
-# ---------------------------
-data = get_dse_data(TICKERS)
+if uploaded_file:
+    all_data = get_dse_data(uploaded_file)
+    tickers = list(all_data.keys())
+    st.sidebar.write(f"✅ Loaded {len(tickers)} tickers")
 
-# Display placeholder tables
-for t in TICKERS:
-    st.subheader(f"{t} Data")
-    st.dataframe(data[t])
+    # ---------------------------
+    # Show Dashboard
+    # ---------------------------
+    st.subheader("Ticker Data Preview (first 5 tickers)")
+    for t in tickers[:5]:
+        st.write(f"### {t}")
+        st.dataframe(all_data[t].tail())
 
-# ---------------------------
-# Display Placeholder Signals
-# ---------------------------
-st.subheader("Signals")
-for t in TICKERS:
-    st.write(f"{t} Minervini Stage 2:", minervini_stage2(data[t]))
-    st.write(f"{t} Bollinger Signal:", bollinger_signal(data[t]))
-    st.write(f"{t} Relative Strength:", rel_strength(data[t]))
+    st.subheader("Signals Preview (first 5 tickers)")
+    for t in tickers[:5]:
+        st.write(f"{t} Minervini Stage 2:", minervini_stage2(all_data[t]))
+        st.write(f"{t} Bollinger Signal:", bollinger_signal(all_data[t]))
+        st.write(f"{t} Relative Strength:", rel_strength(all_data[t]))
 
-# ---------------------------
-# Scheduler Placeholder
-# ---------------------------
-scheduler = BackgroundScheduler()
-scheduler.start()
-
+    # ---------------------------
+    # Scheduler for Volume Alerts
+    # ---------------------------
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        lambda: send_volume_alert(all_data),
+        'cron',
+        hour=[11,12,13,14],
+        minute=0,
+        timezone='Asia/Dhaka'
+    )
+    scheduler.start()
+    st.success("✅ Volume alert scheduler is running (11 AM, 12 PM, 1 PM, 2 PM BD Time)")
+else:
+    st.info("Please upload an Excel sheet to start analysis.")
