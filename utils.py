@@ -14,14 +14,14 @@ def get_dse_data(uploaded_file):
     Automatically detects ticker column (case-insensitive, strips spaces)
     """
     df = pd.read_excel(uploaded_file)
-    
-    # Strip whitespace from column names
-    df.columns = df.columns.str.strip()
-    
+
+    # Force all column names to string and strip spaces
+    df.columns = df.columns.astype(str).str.strip()
+
     # Detect Ticker column
     ticker_col = None
     for col in df.columns:
-        if col.lower() == 'ticker':
+        if str(col).lower() == 'ticker':  # ensure col is string
             ticker_col = col
             break
     if ticker_col is None:
