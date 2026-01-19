@@ -5,24 +5,38 @@ import smtplib
 from datetime import datetime
 
 # ---------------------------
-# DSE Data Functions
+# Read Excel & Prepare Data
 # ---------------------------
-
 def get_dse_data(uploaded_file):
     """
-    Reads uploaded Excel with columns:
+    Reads uploaded Excel with columns like:
     Ticker | Date | Open | High | Low | Close | Volume
+    Automatically detects ticker column (case-insensitive, strips spaces)
     """
     df = pd.read_excel(uploaded_file)
-    tickers = df['Ticker'].unique()
-    all_data = {t: df[df['Ticker']==t].copy() for t in tickers}
-    return all_data
+    
+    # Strip whitespace from column names
+    df.columns = df.columns.str.strip()
+    
+    # Detect Ticker column
+    ticker_col = None
+    for col in df.columns:
+        if col.lower() == 'ticker':
+            ticker_col = col
+            break
+    if ticker_col is None:
+        raise ValueError("Uploaded Excel must have a 'Ticker' column!")
+
+    tickers = df[ticker_col].unique()
+    all_data = {t: df[df[ticker_col]==t].copy() for t in tickers}
+    return all_data, ticker_col
 
 # ---------------------------
 # Minervini Stage 2 Placeholder
 # ---------------------------
 def minervini_stage2(df):
     """Return True if Stage 2 conditions are met (placeholder)"""
+    # Real logic can be added here later
     return False
 
 # ---------------------------
@@ -30,6 +44,7 @@ def minervini_stage2(df):
 # ---------------------------
 def bollinger_signal(df):
     """Return 'buy', 'sell', or 'hold' (placeholder)"""
+    # Real logic can be added here later
     return 'hold'
 
 # ---------------------------
@@ -42,16 +57,18 @@ def rel_strength(df):
 # ---------------------------
 # Email Volume Alerts
 # ---------------------------
-def send_volume_alert(all_data, email="yaan800@gmail.com", app_password="uroy gabw lhyx zcaw"):
+def send_volume_alert(all_data, ticker_col, email="yaan800@gmail.com", app_password="uroy gabw lhyx zcaw"):
     """
     Sends email for tickers where current volume exceeds thresholds
     """
-    thresholds = [0.5, 0.8, 1.0]
+    thresholds = [0.5, 0.8, 1.0]  # 50%, 80%, 100%
     alerts = []
 
     for ticker, df in all_data.items():
         if df.empty or 'Volume' not in df.columns:
             continue
+        if len(df) < 2:
+            continue  # Need at least 2 days for previous volume
         prev_vol = df['Volume'].iloc[-2]  # previous day's total
         current_vol = df['Volume'].iloc[-1]  # latest value
         for t in thresholds:
