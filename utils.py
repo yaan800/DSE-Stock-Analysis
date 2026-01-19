@@ -60,6 +60,17 @@ def add_bollinger(df, window=20):
     df["BB_LOWER"] = df["BB_MID"] - 2 * df["BB_STD"]
     return df
 
+# -------------------------------------------------
+# Bollinger Lower Band Touch Filter
+# -------------------------------------------------
+def bollinger_lower_touch(df):
+    """
+    Returns rows where Close is at or below the Lower Bollinger Band
+    """
+    df = df.copy()
+    # Flag rows where close <= lower band
+    df["BB_Lower_Touch"] = df["Close"] <= df["BB_LOWER"]
+    return df[df["BB_Lower_Touch"]]
 
 # -------------------------------------------------
 # Minervini Stage 2 (simplified & correct)
