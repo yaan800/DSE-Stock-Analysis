@@ -2,5 +2,6 @@ streamlit
 pandas
 pandas_ta
 numpy
+plotly
 apscheduler
 openpyxl
