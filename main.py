@@ -1,47 +1,22 @@
-import streamlit as st
-from apscheduler.schedulers.background import BackgroundScheduler
-from utils import get_dse_data, minervini_stage2, bollinger_signal, rel_strength, send_volume_alert
+from utils import get_dse_data
 
-st.set_page_config(page_title="DSE Stock Analysis", layout="wide")
-st.title("📊 DSE Stock Analysis Dashboard")
+def main():
+    print("=== DSE Stock Analysis ===")
+    
+    # Ask user for file path
+    uploaded_file = input("Enter path to your Excel/CSV file: ").strip()
 
-# ---------------------------
-# Upload Excel
-# ---------------------------
-uploaded_file = st.file_uploader("Upload your DSE OHLCV Excel sheet", type=["xlsx", "xls", "csv"])
+    try:
+        all_data, tickers = get_dse_data(uploaded_file)
+        print(f"\n✅ Loaded {len(tickers)} tickers successfully!")
+    except Exception as e:
+        print(f"\n❌ Error loading data: {e}")
+        return
 
-if uploaded_file:
-    all_data, ticker_col = get_dse_data(uploaded_file)
-    tickers = list(all_data.keys())
-    st.sidebar.write(f"✅ Loaded {len(tickers)} tickers")
+    # Example: show first 5 rows of each ticker
+    for t in tickers[:5]:  # just show first 5 tickers for brevity
+        print(f"\nTicker: {t}")
+        print(all_data[t].head())
 
-    # ---------------------------
-    # Show Dashboard
-    # ---------------------------
-    st.subheader("Ticker Data Preview (first 5 tickers)")
-    for t in tickers[:5]:
-        st.write(f"### {t}")
-        st.dataframe(all_data[t].tail())
-
-    st.subheader("Signals Preview (first 5 tickers)")
-    for t in tickers[:5]:
-        st.write(f"{t} Minervini Stage 2:", minervini_stage2(all_data[t]))
-        st.write(f"{t} Bollinger Signal:", bollinger_signal(all_data[t]))
-        st.write(f"{t} Relative Strength:", rel_strength(all_data[t]))
-
-    # ---------------------------
-    # Scheduler for Volume Alerts
-    # ---------------------------
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        lambda: send_volume_alert(all_data, ticker_col),
-        'cron',
-        hour=[11,12,13,14],
-        minute=0,
-        timezone='Asia/Dhaka'
-    )
-    scheduler.start()
-    st.success("✅ Volume alert scheduler is running (11 AM, 12 PM, 1 PM, 2 PM BD Time)")
-
-else:
-    st.info("Please upload an Excel sheet to start analysis.")
+if __name__ == "__main__":
+    main()
