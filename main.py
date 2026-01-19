@@ -1,32 +1,32 @@
 import streamlit as st
-from utils import get_dse_data
+from utils import read_excel_safely, process_sheet
 
-st.set_page_config(page_title="DSE Multi-Sheet Loader", layout="wide")
-st.title("📈 DSE Multi-Day Stock Analysis App")
+st.set_page_config(page_title="DSE Multi-Sheet Analyzer", layout="wide")
+st.title("📊 DSE Multi-Sheet Excel Analyzer")
 
-uploaded_file = st.file_uploader("Upload your multi-sheet Excel file", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload your Excel file", type=['xlsx'])
 
-if uploaded_file is not None:
-    try:
-        with st.spinner("Processing all sheets..."):
-            all_data, tickers_list = get_dse_data(uploaded_file)
-        st.success(f"✅ Loaded {len(tickers_list)} tickers across {len(all_data[tickers_list[0]])} sheets each!")
+if uploaded_file:
+    st.info("Reading Excel file...")
+    all_sheets = read_excel_safely(uploaded_file)
 
-        # Sample view: first ticker and first sheet
-        sample_ticker = tickers_list[0]
-        sample_sheet = list(all_data[sample_ticker].keys())[0]
-        st.subheader(f"Sample Data: {sample_ticker} | Sheet: {sample_sheet}")
-        st.dataframe(all_data[sample_ticker][sample_sheet])
+    if not all_sheets:
+        st.error("No valid sheets found in the Excel file.")
+    else:
+        st.success(f"Found {len(all_sheets)} sheets.")
 
-        # Ticker selector
-        selected_ticker = st.selectbox("Select a ticker", tickers_list)
-        selected_sheet = st.selectbox(
-            "Select a date/sheet",
-            list(all_data[selected_ticker].keys())
-        )
-        st.dataframe(all_data[selected_ticker][selected_sheet])
+        sheet_to_view = st.selectbox("Select a sheet to preview", list(all_sheets.keys()))
 
-    except Exception as e:
-        st.error(f"Error processing Excel: {e}")
-else:
-    st.info("Please upload an Excel file to continue.")
+        if sheet_to_view:
+            df_raw = all_sheets[sheet_to_view]
+            df_processed = process_sheet(df_raw)
+
+            if df_processed is not None:
+                st.subheader(f"Preview of '{sheet_to_view}'")
+                st.dataframe(df_processed.head(20))
+
+                # Basic statistics
+                st.subheader("Summary Statistics")
+                st.write(df_processed.describe())
+            else:
+                st.warning("Could not process this sheet.")
