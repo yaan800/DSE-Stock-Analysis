@@ -1,6 +1,6 @@
 import pandas as pd
 import pandas_ta as ta
-from stocksurferbd import DSE
+
 
 def get_dse_data(tickers):
     all_data = {}
