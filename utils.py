@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from utils import add_bollinger
+
 
 
 # -------------------------------------------------
@@ -62,22 +62,7 @@ def add_bollinger(df, window=20):
     df["BB_LOWER"] = df["BB_MID"] - 2 * df["BB_STD"]
     return df
 
-# ---------------------------
-# Add Bollinger Bands to dataframe
-df = add_bollinger(df)
 
-# ---------------------------
-# Filter stocks touching or about to touch lower band
-threshold = 0.01  # 1% above lower band counts as "about to touch"
-bb_buy_mask = df["Close"] <= df["BB_LOWER"] * (1 + threshold)
-bb_buy_stocks = df[bb_buy_mask].copy()
-
-# Display in Streamlit
-if not bb_buy_stocks.empty:
-    st.subheader("Stocks touching / about to touch Lower Bollinger Band")
-    st.dataframe(bb_buy_stocks[["Ticker", "Date", "Close", "BB_LOWER", "Volume"]])
-else:
-    st.write("No stocks are near the lower Bollinger Band currently.")
 # -------------------------------------------------
 # Minervini Stage 2 (simplified & correct)
 # -------------------------------------------------
