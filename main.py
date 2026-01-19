@@ -1,63 +1,46 @@
-import streamlit as st
 import pandas as pd
-from utils import (
-    load_excel_data_filtered,
-    add_bollinger,
-    bollinger_lower_touch,
-    add_minervini_stage2
-)
+import pandas_ta as ta
+import streamlit as st
+from utils import load_excel_data_filtered, add_bollinger, bollinger_lower_touch, add_minervini_stage2
 
-# -----------------------------
-# App Title
-# -----------------------------
+st.set_page_config(page_title="DSE Stock Analysis Option A", layout="wide")
 st.title("DSE Stock Analysis - Option A")
-st.write("Upload your Excel file containing all DSE stock data (first sheet = desired stocks).")
 
-# -----------------------------
+# -------------------------------
 # Upload Excel
-# -----------------------------
-uploaded_file = st.file_uploader("Upload DSE Excel file", type=["xls","xlsx"])
-
+# -------------------------------
+uploaded_file = st.file_uploader("Upload DSE Excel file", type=["xls", "xlsx"])
 if uploaded_file:
     try:
-        # Load all sheet names
+        # Show all sheets in the Excel
         xls = pd.ExcelFile(uploaded_file)
-        sheet_list = xls.sheet_names
+        sheet_names = xls.sheet_names
+        st.sidebar.subheader("Sheets in file")
+        selected_sheet = st.sidebar.selectbox("Select sheet to analyze", sheet_names[1:])  # skip first sheet (desired stocks)
 
-        # First sheet = desired stocks
-        desired_stocks_df = pd.read_excel(uploaded_file, sheet_name=sheet_list[0], header=None, usecols="A")
-        desired_stocks = desired_stocks_df.iloc[:,0].dropna().tolist()
-        st.write(f"Desired Stocks ({len(desired_stocks)}):")
-        st.write(desired_stocks)
+        # Load data for selected sheet, automatically filtered by desired stocks from first sheet
+        full_df = load_excel_data_filtered(uploaded_file, selected_sheet)
 
-        # Select sheet to analyze
-        selected_sheet = st.selectbox("Select Sheet (Date) for analysis", sheet_list[1:])
+        # -------------------------------
+        # Calculate Bollinger Bands
+        # -------------------------------
+        full_df = add_bollinger(full_df)
 
-        # Load only desired stocks from selected sheet
-        sheet_df = load_excel_data_filtered(uploaded_file, selected_sheet, desired_stocks)
+        # -------------------------------
+        # Minervini Stage 2 Screener
+        # -------------------------------
+        full_df = add_minervini_stage2(full_df)
 
-        st.subheader(f"Data from sheet: {selected_sheet}")
-        st.dataframe(sheet_df)
+        # -------------------------------
+        # Display Full Data
+        # -------------------------------
+        st.subheader("Full Data")
+        st.dataframe(full_df)
 
-        # -----------------------------
-        # Bollinger Bands
-        # -----------------------------
-        sheet_df = add_bollinger(sheet_df)
-        st.subheader("Dataset with Bollinger Bands")
-        st.dataframe(sheet_df)
-
-        # -----------------------------
-        # Minervini Stage 2
-        # -----------------------------
-        sheet_df = add_minervini_stage2(sheet_df)
-        minervini_stocks = sheet_df[sheet_df["Stage2"]==True]
-        st.subheader("Stocks Passing Minervini Stage 2")
-        st.dataframe(minervini_stocks)
-
-        # -----------------------------
-        # Stocks Touching / Below Lower Bollinger Band
-        # -----------------------------
-        df_touching_lower = bollinger_lower_touch(sheet_df)
+        # -------------------------------
+        # Stocks touching or below Lower Bollinger Band
+        # -------------------------------
+        df_touching_lower = bollinger_lower_touch(full_df)
         st.subheader("Stocks Touching / Below Lower Bollinger Band")
         st.dataframe(df_touching_lower)
 
