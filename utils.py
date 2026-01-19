@@ -1,47 +1,54 @@
 import pandas as pd
+from io import BytesIO
 
-def get_dse_data(file_path):
+def get_dse_data(file) -> tuple[dict, list]:
     """
-    Reads a DSE file (Excel/CSV/text), handles missing headers,
-    filters out indices/sectors, and returns clean OHLCV data per ticker.
+    Reads an uploaded Excel or CSV file with DSE data (no headers)
+    and returns a dictionary of DataFrames for each ticker/sector row.
     
-    Args:
-        file_path (str): Path to Excel/CSV file.
-    
-    Returns:
-        all_data (dict): Dictionary with ticker as key and DataFrame as value.
-        ticker_list (list): List of valid tickers.
+    file: Uploaded file object from Streamlit
+    Returns: (all_data, tickers_list)
     """
-    # Try reading Excel first, then CSV fallback
-    try:
-        df = pd.read_excel(file_path, header=None)
-    except Exception:
-        df = pd.read_csv(file_path, header=None, sep='\t', engine='python')
-
-    # Assign columns (adjust if more than 7 columns)
-    col_count = df.shape[1]
-    if col_count >= 7:
-        df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume'] + [f'Extra_{i}' for i in range(7, col_count)]
+    # Detect file type
+    if str(file).endswith(".csv"):
+        df = pd.read_csv(file, header=None)
     else:
-        df.columns = [f'Col_{i+1}' for i in range(col_count)]
+        df = pd.read_excel(file, header=None)
 
-    # Convert numeric columns safely
-    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+    all_data = {}
+    tickers_list = []
 
-    # Drop rows where Close is NaN (these are sectors/indices/mutual funds)
-    df_clean = df[df['Close'].notna()].copy()
+    for idx, row in df.iterrows():
+        # First column is ticker/sector name
+        name = str(row[0]).strip()
+        if not name:
+            continue
 
-    if df_clean.empty:
-        raise ValueError("No valid ticker rows found with numeric OHLCV data.")
+        # The next columns: date, open, high, low, close, volume
+        try:
+            # Convert numeric columns safely
+            date = pd.to_datetime(row[1])
+            o = float(row[2])
+            h = float(row[3])
+            l = float(row[4])
+            c = float(row[5])
+            v = float(row[6])
+        except (ValueError, IndexError):
+            # Skip rows like "IT Sector", "Bank", "DSEX", etc.
+            continue
 
-    # Standardize Date column
-    if 'Date' in df_clean.columns:
-        df_clean['Date'] = pd.to_datetime(df_clean['Date'], errors='coerce')
+        # Save as single-row DataFrame
+        all_data[name] = pd.DataFrame({
+            'Date': [date],
+            'Open': [o],
+            'High': [h],
+            'Low': [l],
+            'Close': [c],
+            'Volume': [v]
+        })
+        tickers_list.append(name)
 
-    # Create dictionary per ticker
-    tickers = df_clean['Ticker'].unique()
-    all_data = {t: df_clean[df_clean['Ticker']==t].copy() for t in tickers}
+    if not all_data:
+        raise ValueError("No valid ticker/stock rows found in uploaded file!")
 
-    return all_data, tickers
+    return all_data, tickers_list
