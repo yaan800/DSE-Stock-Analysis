@@ -1,57 +1,49 @@
 import pandas as pd
+import streamlit as st
 
-def get_dse_data(file) -> tuple[dict, list]:
+def read_excel_safely(file):
     """
-    Reads an uploaded Excel file with multiple sheets (dates) and no headers.
-    Returns a nested dictionary: {ticker: {date: DataFrame}}
-    
-    file: Uploaded Excel file object
-    Returns: (all_data, tickers_list)
+    Reads all sheets from an Excel file safely.
+    Skips sheets that cause errors.
+    Returns a dictionary of {sheet_name: DataFrame}.
     """
-    xls = pd.ExcelFile(file)
-    all_data = {}
-    tickers_set = set()
+    try:
+        xls = pd.ExcelFile(file, engine='openpyxl')
+    except Exception as e:
+        st.error(f"Failed to read Excel file: {e}")
+        return {}
 
+    all_sheets = {}
     for sheet_name in xls.sheet_names:
         try:
-            df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
-        except Exception:
+            # Read sheet without headers
+            df = pd.read_excel(xls, sheet_name=sheet_name, header=None, engine='openpyxl')
+            all_sheets[sheet_name] = df
+        except Exception as e:
+            st.warning(f"Skipped sheet '{sheet_name}' due to error: {e}")
             continue
 
-        for idx, row in df.iterrows():
-            name = str(row[0]).strip()
-            if not name:
-                continue
+    return all_sheets
 
-            # Convert numeric columns safely
-            try:
-                date = pd.to_datetime(row[1])
-                o = float(row[2])
-                h = float(row[3])
-                l = float(row[4])
-                c = float(row[5])
-                v = float(row[6])
-            except (ValueError, IndexError):
-                continue  # skip sectors/aggregate rows
 
-            # Create single-row DataFrame
-            df_row = pd.DataFrame({
-                'Date': [date],
-                'Open': [o],
-                'High': [h],
-                'Low': [l],
-                'Close': [c],
-                'Volume': [v]
-            })
+def process_sheet(df):
+    """
+    Processes a single sheet into a structured DataFrame.
+    Assumes columns: Name, Date, Open, High, Low, Close, Volume
+    """
+    if df.shape[1] < 7:
+        # Not enough columns
+        st.warning("Sheet has fewer than 7 columns, skipping.")
+        return None
 
-            # Initialize ticker in dictionary if needed
-            if name not in all_data:
-                all_data[name] = {}
-            all_data[name][sheet_name] = df_row
-            tickers_set.add(name)
+    df = df.iloc[:, :7]  # Only first 7 columns
+    df.columns = ['Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
-    if not all_data:
-        raise ValueError("No valid ticker rows found across all sheets!")
+    # Convert numeric columns
+    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    tickers_list = sorted(list(tickers_set))
-    return all_data, tickers_list
+    # Convert Date column
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
+
+    return df
