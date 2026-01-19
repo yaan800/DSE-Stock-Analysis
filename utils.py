@@ -10,20 +10,36 @@ from datetime import datetime
 def get_dse_data(uploaded_file):
     """
     Reads uploaded Excel without headers.
-    Assigns default column names:
-    Ticker, Date, Open, High, Low, Close, Volume
+    Assigns default column names based on number of columns.
     """
-    df = pd.read_excel(uploaded_file, header=None)  # <- no header in file
+    df = pd.read_excel(uploaded_file, header=None)  # no header in file
 
-    # Assign column names
-    df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+    # Generate default column names
+    col_count = df.shape[1]
+    default_cols = []
+    if col_count >= 7:
+        default_cols = ['Ticker','Date','Open','High','Low','Close','Volume']
+        # Add extra columns if exist
+        for i in range(7, col_count):
+            default_cols.append(f'Extra_{i-6}')
+    else:
+        # If less than 7 columns, name them generically
+        default_cols = [f'Col_{i+1}' for i in range(col_count)]
+
+    df.columns = default_cols
+
+    # Ensure Ticker column exists
+    if 'Ticker' not in df.columns:
+        df.rename(columns={df.columns[0]: 'Ticker'}, inplace=True)
 
     # Strip strings just in case
     df['Ticker'] = df['Ticker'].astype(str).str.strip()
 
     tickers = df['Ticker'].unique()
     all_data = {t: df[df['Ticker']==t].copy() for t in tickers}
+
     return all_data, 'Ticker'
+
 
 
 # ---------------------------
