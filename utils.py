@@ -1,88 +1,82 @@
 import pandas as pd
+import pandas_ta as ta
 import numpy as np
 
-# -------------------------------------------------
-# Read Excel and build clean time-series per stock
-# -------------------------------------------------
-def load_excel_data(uploaded_file):
+# -----------------------------
+# Load Excel & Filter Desired Stocks
+# -----------------------------
+def load_excel_data_filtered(uploaded_file, sheet_name):
+    """
+    Loads a sheet from Excel, keeps only stocks in the first sheet.
+    Handles missing rows/cells and ensures correct columns.
+    """
+    # Read first sheet to get desired stock list
     xls = pd.ExcelFile(uploaded_file)
+    first_sheet = xls.sheet_names[0]
+    desired_df = pd.read_excel(uploaded_file, sheet_name=first_sheet, header=None, usecols="A")
+    desired_stocks = desired_df.iloc[:, 0].dropna().tolist()
 
-    # First sheet = reference universe of desired stocks
-    ref_sheet = xls.sheet_names[0]
-    ref_df = pd.read_excel(xls, sheet_name=ref_sheet, header=None)
-    desired_stocks = ref_df.iloc[:, 0].dropna().astype(str).str.strip().unique().tolist()
+    # Read target sheet
+    df = pd.read_excel(
+        uploaded_file,
+        sheet_name=sheet_name,
+        header=None,
+        usecols="A:G"  # enforce Ticker, Date, Open, High, Low, Close, Volume
+    )
+    df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
-    all_rows = []
+    # Filter only desired stocks
+    df = df[df['Ticker'].isin(desired_stocks)].reset_index(drop=True)
 
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet, header=None)
+    # Ensure numeric columns are correct
+    for col in ['Open','High','Low','Close','Volume']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Need at least 7 columns
-        if df.shape[1] < 7:
-            continue
-
-        # Map columns correctly
-        df = df[[0, 1, 2, 3, 4, 5, 6]].copy()
-        df.columns = ["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"]
-
-        df["Ticker"] = df["Ticker"].astype(str).str.strip()
-        df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-        df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-
-        df = df[
-            df["Ticker"].isin(desired_stocks) &
-            df["Close"].notna()
-        ]
-
-        if df.empty:
-            continue
-
-        all_rows.append(df)
-
-    if not all_rows:
-        raise ValueError("No valid stock data found in Excel")
-
-    full_df = pd.concat(all_rows, ignore_index=True)
-    full_df = full_df.sort_values(["Ticker", "Date"])
-
-    return full_df
-
-
-# -------------------------------------------------
-# Bollinger Bands (20)
-# -------------------------------------------------
-def add_bollinger(df, window=20):
-    df = df.sort_values("Date").copy()
-    df["BB_MID"] = df["Close"].rolling(window).mean()
-    df["BB_STD"] = df["Close"].rolling(window).std()
-    df["BB_UPPER"] = df["BB_MID"] + 2 * df["BB_STD"]
-    df["BB_LOWER"] = df["BB_MID"] - 2 * df["BB_STD"]
     return df
 
-# -------------------------------------------------
-# Bollinger Lower Band Touch Filter
-# -------------------------------------------------
+# -----------------------------
+# Bollinger Bands
+# -----------------------------
+def add_bollinger(df, length=20, std=2):
+    """
+    Adds Bollinger Bands columns to the dataframe.
+    """
+    df['BB_MA'] = df['Close'].rolling(length).mean()
+    df['BB_Upper'] = df['BB_MA'] + std * df['Close'].rolling(length).std()
+    df['BB_Lower'] = df['BB_MA'] - std * df['Close'].rolling(length).std()
+    return df
+
 def bollinger_lower_touch(df):
     """
-    Returns rows where Close is at or below the Lower Bollinger Band
+    Returns stocks touching or below the lower Bollinger Band.
     """
-    df = df.copy()
-    # Flag rows where close <= lower band
-    df["BB_Lower_Touch"] = df["Close"] <= df["BB_LOWER"]
-    return df[df["BB_Lower_Touch"]]
+    df_touch = df[(df['Close'] <= df['BB_Lower'])]
+    return df_touch[['Ticker','Date','Close','BB_Lower']]
 
-# -------------------------------------------------
-# Minervini Stage 2 (simplified & correct)
-# -------------------------------------------------
+# -----------------------------
+# Minervini Stage 2
+# -----------------------------
 def add_minervini_stage2(df):
-    df = df.sort_values("Date").copy()
-    df["MA50"] = df["Close"].rolling(50).mean()
-    df["MA150"] = df["Close"].rolling(150).mean()
-    df["MA200"] = df["Close"].rolling(200).mean()
-    df["Stage2"] = (
-        (df["Close"] > df["MA50"]) &
-        (df["MA50"] > df["MA150"]) &
-        (df["MA150"] > df["MA200"])
+    """
+    Adds a column Stage2 = True if stock passes simplified Minervini rules:
+    - Close > 150MA & 200MA
+    - 50MA > 150MA
+    - Price at least 30% above 52-week low
+    - Price within 25% of 52-week high
+    """
+    df['MA50'] = df['Close'].rolling(50).mean()
+    df['MA150'] = df['Close'].rolling(150).mean()
+    df['MA200'] = df['Close'].rolling(200).mean()
+    df['52W_Low'] = df['Close'].rolling(252).min()  # approx 1 year
+    df['52W_High'] = df['Close'].rolling(252).max()
+
+    conditions = (
+        (df['Close'] > df['MA150']) &
+        (df['Close'] > df['MA200']) &
+        (df['MA50'] > df['MA150']) &
+        (df['Close'] > df['52W_Low']*1.3) &
+        (df['Close'] > df['52W_High']*0.75)
     )
+
+    df['Stage2'] = conditions
     return df
