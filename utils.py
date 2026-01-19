@@ -1,23 +1,33 @@
 import pandas as pd
+import numpy as np
 
 # --- Prepare raw sheet data ---
 def prepare_data(df):
-    # Ensure at least 7 columns
-    if df.shape[1] < 7:
-        raise ValueError("Sheet has fewer than 7 columns, skipping.")
+    # Only keep rows with at least 7 columns
+    df = df.dropna(thresh=7)
 
-    # Assign column names
+    # Assign proper column names
     df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
     # Convert numeric columns
     for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # Convert Date
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    # Drop rows with NaN in essential numeric columns
+    df = df.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
 
+    # Optional: remove rows where Close or Volume is zero or negative
+    df = df[(df['Close'] > 0) & (df['Volume'] > 0)]
+
+    # Convert Date if exists, otherwise fill with today
+    try:
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    except:
+        df['Date'] = pd.Timestamp.today()
+
+    # Reset index
+    df = df.reset_index(drop=True)
     return df
-
 # --- Bollinger Bands ---
 def calculate_bollinger(df, period=20, std=2):
     df['BB_Mid'] = df['Close'].rolling(period).mean()
