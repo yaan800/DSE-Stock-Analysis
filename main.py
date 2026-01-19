@@ -1,45 +1,47 @@
 import streamlit as st
 import pandas as pd
-from utils import calculate_bollinger, check_minervini, prepare_data
+import io
+from utils import prepare_data, bollinger_signal, minervini_stage2, add_technical_indicators
 
-st.set_page_config(page_title="DSE Stock Analysis - Option A", layout="wide")
-st.title("📊 DSE Stock Analysis (Option A)")
+st.set_page_config(page_title="DSE Stock Analysis", layout="wide")
+st.title("📊 DSE Stock Analysis - Technical Analysis Tool")
 
-# --- File upload ---
-uploaded_file = st.file_uploader("Upload your Excel file with multiple sheets", type=["xlsx"])
-
+# -----------------------------
+# Upload Excel File
+# -----------------------------
+uploaded_file = st.file_uploader("Upload your DSE Excel file", type=["xlsx"])
 if uploaded_file:
     try:
-        # Read Excel in memory
-        xls = pd.ExcelFile(uploaded_file)
-
-        # Show available sheets
+        in_memory_file = io.BytesIO(uploaded_file.read())
+        xls = pd.ExcelFile(in_memory_file)
         sheet_list = xls.sheet_names
+        
         selected_sheet = st.selectbox("Select Sheet (Date)", sheet_list)
-
-        # Read the selected sheet without header
-        df = pd.read_excel(uploaded_file, sheet_name=selected_sheet, header=None)
-
-        # Prepare data: add column names, numeric conversions
-        df = prepare_data(df)
-
-        st.subheader(f"Data from sheet: {selected_sheet}")
+        df_raw = pd.read_excel(in_memory_file, sheet_name=selected_sheet, header=None)
+        
+        # Prepare Data
+        df = prepare_data(df_raw)
+        
+        # Show Raw & Cleaned Data
+        st.subheader("✅ Cleaned Stock Data")
         st.dataframe(df)
-
-        # --- Bollinger Bands ---
-        bb_period = st.number_input("Bollinger Bands Period", min_value=5, max_value=100, value=20)
-        bb_std = st.number_input("Bollinger Bands Std Dev", min_value=1.0, max_value=5.0, value=2.0, step=0.1)
-
-        df_bb = calculate_bollinger(df.copy(), period=bb_period, std=bb_std)
-        st.subheader("Bollinger Bands Calculated")
-        st.dataframe(df_bb[['Ticker', 'Close', 'BB_Mid', 'BB_Upper', 'BB_Lower']])
-
-        # --- Mike Minervini Conditions ---
-        st.subheader("Mike Minervini Conditions")
-        df_mm = check_minervini(df.copy())
-        st.dataframe(df_mm[['Ticker', 'Close', '50MA', '150MA', '200MA', 'Minervini_Buy']])
-
+        
+        # Bollinger Bands
+        df = bollinger_signal(df)
+        
+        # Minervini Stage 2
+        df = minervini_stage2(df)
+        
+        # Additional Indicators
+        df = add_technical_indicators(df)
+        
+        st.subheader("📈 Technical Indicators and Signals")
+        st.dataframe(df[['Ticker', 'Close', 'Volume', 'BB_lower', 'BB_signal', 'MA50', 'MA150', 'MA200', 'Stage2', 'RSI14', 'EMA9', 'EMA21', 'EMA50', 'EMA200']])
+        
+        # Optional: Save signals to CSV
+        if st.button("Save Signals to CSV"):
+            df.to_csv("dse_signals.csv", index=False)
+            st.success("Signals saved as dse_signals.csv")
+        
     except Exception as e:
         st.error(f"Error processing Excel: {e}")
-else:
-    st.info("Please upload an Excel file to start.")
