@@ -1,5 +1,5 @@
 import pandas as pd
-import streamlit as st
+import pandas_ta as ta
 
 # -------------------------------
 # Excel Processing Functions
@@ -10,8 +10,7 @@ def read_excel_safely(file):
     try:
         xls = pd.ExcelFile(file, engine='openpyxl')
     except Exception as e:
-        st.error(f"Failed to read Excel file: {e}")
-        return {}
+        return {}, f"Failed to read Excel: {e}"
 
     all_sheets = {}
     for sheet_name in xls.sheet_names:
@@ -19,46 +18,53 @@ def read_excel_safely(file):
             df = pd.read_excel(xls, sheet_name=sheet_name, header=None, engine='openpyxl')
             all_sheets[sheet_name] = df
         except Exception as e:
-            st.warning(f"Skipped sheet '{sheet_name}' due to error: {e}")
             continue
-    return all_sheets
+    return all_sheets, None
 
 
 def process_sheet(df):
-    """Process a single sheet into structured DataFrame"""
+    """Process sheet into structured DataFrame"""
     if df.shape[1] < 7:
-        st.warning("Sheet has fewer than 7 columns, skipping.")
-        return None
-
-    df = df.iloc[:, :7]
-    df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        return None  # sheet too short
+    df = df.iloc[:, :7]  # take first 7 columns only
+    df.columns = ['Ticker','Date','Open','High','Low','Close','Volume']
 
     # Convert numeric columns
-    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+    for col in ['Open','High','Low','Close','Volume']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # Convert Date
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
 
     return df
 
 
-def merge_today_data(historical_df, today_file):
-    """Merge today’s Excel/CSV with historical data"""
-    ext = today_file.name.split('.')[-1]
-    if ext == 'csv':
-        today_df = pd.read_csv(today_file, header=None)
-    else:
-        today_df = pd.read_excel(today_file, header=None, engine='openpyxl')
+# -------------------------------
+# Technical Calculations
+# -------------------------------
 
-    if today_df.shape[1] < 7:
-        st.error("Today's file must have at least 7 columns: Ticker, Date, Open, High, Low, Close, Volume")
-        return historical_df
+def bollinger_signal(df, length=20, std=2):
+    """Add Bollinger Bands and buy/sell signals"""
+    df = df.copy()
+    df['BB_upper'] = df['Close'].rolling(length).mean() + std*df['Close'].rolling(length).std()
+    df['BB_lower'] = df['Close'].rolling(length).mean() - std*df['Close'].rolling(length).std()
+    df['BB_signal'] = df['Close'] < df['BB_lower']
+    return df
 
-    today_df.columns = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-        today_df[col] = pd.to_numeric(today_df[col], errors='coerce')
-    today_df['Date'] = pd.to_datetime(today_df['Date'], errors='coerce', dayfirst=True)
 
-    merged = pd.concat([historical_df, today_df], ignore_index=True)
-    return merged
+def minervini_stage2(df):
+    """Add Mike Minervini Stage 2 Filter"""
+    df = df.copy()
+    df['MA50'] = df['Close'].rolling(50).mean()
+    df['MA150'] = df['Close'].rolling(150).mean()
+    df['MA200'] = df['Close'].rolling(200).mean()
+    df['52W_low'] = df['Close'].rolling(252).min()
+    df['52W_high'] = df['Close'].rolling(252).max()
+
+    df['Stage2'] = (
+        (df['Close'] > df['MA150']) &
+        (df['Close'] > df['MA200']) &
+        (df['MA150'] > df['MA200']) &
+        (df['MA50'] > df['MA150']) &
+        (df['Close'] > 1.3*df['52W_low']) &
+        (df['Close'] <= 1.25*df['52W_high'])
+    )
+    return df
