@@ -42,13 +42,36 @@ def process_sheet(df):
 # -------------------------------
 
 def bollinger_signal(df, length=20, std=2):
-    """Add Bollinger Bands and buy/sell signals"""
+    """
+    Calculate Bollinger Bands and generate signals when price crosses the bands.
+    - df: DataFrame with at least 'Close'
+    - length: rolling period
+    - std: number of standard deviations
+    Returns df with new columns:
+        - BB_mid, BB_upper, BB_lower
+        - BB_signal (True if Close crosses below lower band)
+    """
     df = df.copy()
-    df['BB_upper'] = df['Close'].rolling(length).mean() + std*df['Close'].rolling(length).std()
-    df['BB_lower'] = df['Close'].rolling(length).mean() - std*df['Close'].rolling(length).std()
-    df['BB_signal'] = df['Close'] < df['BB_lower']
-    return df
 
+    # Rolling mean and std
+    df['BB_mid'] = df['Close'].rolling(length).mean()
+    df['BB_std'] = df['Close'].rolling(length).std()
+    df['BB_upper'] = df['BB_mid'] + std * df['BB_std']
+    df['BB_lower'] = df['BB_mid'] - std * df['BB_std']
+
+    # Cross below lower band
+    df['BB_signal'] = False
+    # We only trigger signal when previous close was above lower band and current close is below
+    df.loc[(df['Close'].shift(1) > df['BB_lower'].shift(1)) & (df['Close'] < df['BB_lower']), 'BB_signal'] = True
+
+    # Optional: Cross above upper band (sell signal)
+    df['BB_sell_signal'] = False
+    df.loc[(df['Close'].shift(1) < df['BB_upper'].shift(1)) & (df['Close'] > df['BB_upper']), 'BB_sell_signal'] = True
+
+    # Drop temporary std column
+    df.drop(columns=['BB_std'], inplace=True)
+
+    return df
 
 def minervini_stage2(df):
     """Add Mike Minervini Stage 2 Filter"""
