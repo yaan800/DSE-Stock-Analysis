@@ -2,8 +2,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from scipy.signal import find_peaks
+
+# ===== TRY IMPORT AGGRID =====
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+    use_aggrid = True
+except ImportError:
+    use_aggrid = False
+    st.warning("st-aggrid not found. Table selection will fallback to st.dataframe.")
 
 st.set_page_config(layout="wide", page_title="DSE Pro Stock Analyzer")
 
@@ -46,7 +53,7 @@ def load_excel_data(uploaded_file):
     return full_df
 
 # =========================
-# INDICATORS
+# ADD INDICATORS
 # =========================
 def add_indicators(df):
     df = df.sort_values("Date").copy()
@@ -58,18 +65,19 @@ def add_indicators(df):
     df["BB_UPPER"] = ma + BB_STD * std
     df["BB_LOWER"] = ma - BB_STD * std
 
-    # Moving averages for Stage 2
+    # Moving averages
     df["MA50"] = df["Close"].rolling(50, min_periods=50).mean()
     df["MA150"] = df["Close"].rolling(150, min_periods=150).mean()
     df["MA200"] = df["Close"].rolling(200, min_periods=200).mean()
 
+    # Stage 2 condition
     df["Stage2"] = (
         (df["Close"] > df["MA50"]) &
         (df["MA50"] > df["MA150"]) &
         (df["MA150"] > df["MA200"])
     )
 
-    # Volume expansion / Pocket Pivot
+    # Volume expansion & Pocket Pivot
     df["VOL_AVG20"] = df["Volume"].rolling(20).mean()
     df["VolumeExpansion"] = df["Volume"] > df["VOL_AVG20"] * 1.5
     df["PocketPivot"] = (
@@ -85,13 +93,12 @@ def add_indicators(df):
     # Relative Strength (RS Rating) 3-month
     df["RS_63"] = df["Close"].pct_change(63)
 
-    # Basic VCP detection (contraction peaks)
-    df['PeakHighs'], _ = find_peaks(df['Close'], distance=5)
+    # Basic VCP detection (contracting peaks)
+    peaks, _ = find_peaks(df['Close'], distance=5)
     df['VCP'] = False
-    if len(df['PeakHighs']) > 2:
-        # If high peaks are contracting
-        highs = df['Close'].iloc[df['PeakHighs']]
-        df.loc[df.index[df['PeakHighs'][-1]], 'VCP'] = highs.diff().iloc[-1] < 0
+    if len(peaks) > 2:
+        highs = df['Close'].iloc[peaks]
+        df.loc[df.index[peaks[-1]], 'VCP'] = highs.diff().iloc[-1] < 0
 
     return df
 
@@ -107,7 +114,7 @@ data = load_excel_data(uploaded_file)
 data = data.groupby("Ticker", group_keys=False).apply(add_indicators)
 
 # =========================
-# SCANNER (LATEST DAY)
+# LATEST DAY SCANNER
 # =========================
 latest = data.sort_values("Date").groupby("Ticker").tail(1).copy()
 st.markdown("---")
@@ -150,17 +157,18 @@ if len(scan)==0:
     st.stop()
 
 # =========================
-# JS-STYLE TABLE
+# STOCK SELECTION TABLE
 # =========================
 show_cols = ["Ticker","Close","Stage2","VolumeExpansion","PocketPivot","Breakout","RS_63","Score"]
-gb = GridOptionsBuilder.from_dataframe(scan[show_cols])
-gb.configure_selection('single')
-grid_options = gb.build()
-grid_response = AgGrid(scan[show_cols], gridOptions=grid_options, update_mode=GridUpdateMode.SELECTION_CHANGED)
-selected_row = grid_response['selected_rows']
-if selected_row:
-    selected_stock = selected_row[0]['Ticker']
+if use_aggrid:
+    gb = GridOptionsBuilder.from_dataframe(scan[show_cols])
+    gb.configure_selection('single')
+    grid_options = gb.build()
+    grid_response = AgGrid(scan[show_cols], gridOptions=grid_options, update_mode=GridUpdateMode.SELECTION_CHANGED)
+    selected_row = grid_response['selected_rows']
+    selected_stock = selected_row[0]['Ticker'] if selected_row else scan.iloc[0]['Ticker']
 else:
+    st.dataframe(scan[show_cols])
     selected_stock = scan.iloc[0]['Ticker']
 
 # =========================
@@ -195,15 +203,11 @@ fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["MA200"], name="MA200", 
 pp_days = stock_df[stock_df['PocketPivot']==True]
 fig.add_trace(go.Scatter(x=pp_days['Date'], y=pp_days['Close'], mode='markers', marker=dict(color='yellow', size=10), name='Pocket Pivot'))
 
-fig.update_layout(
-    height=650,
-    xaxis_rangeslider_visible=False,
-    template="plotly_dark"
-)
+fig.update_layout(height=650, xaxis_rangeslider_visible=False, template="plotly_dark")
 st.plotly_chart(fig, use_container_width=True)
 
 # =========================
-# PORTFOLIO BACKTEST (TOP N)
+# PORTFOLIO BACKTEST
 # =========================
 st.markdown("---")
 st.subheader("💼 Portfolio Backtest (Top Ranked Stocks)")
