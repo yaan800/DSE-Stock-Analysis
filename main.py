@@ -109,8 +109,9 @@ latest = (
 )
 
 # =========================
-# ===== SCANNER SECTION ===
+# ===== SCANNER AREA (BOTTOM LOGIC FIRST) ===
 # =========================
+st.markdown("---")
 st.subheader("🔍 Smart Scanner (Latest Day Only)")
 
 c1, c2, c3 = st.columns(3)
@@ -147,9 +148,6 @@ if require_stage2:
 if require_breakout:
     scan = scan[scan["Breakout"] == True]
 
-# =========================
-# RESULT TABLE
-# =========================
 st.markdown(f"### 📋 Stocks Found: {len(scan)}")
 
 if len(scan) == 0:
@@ -162,21 +160,21 @@ st.dataframe(scan[show_cols].sort_values("Ticker"), use_container_width=True)
 # =========================
 # SELECT FROM SCANNER
 # =========================
-st.subheader("📈 Click a stock to view chart")
-
 selected_stock = st.selectbox(
-    "Select from scanner results",
+    "📌 Select a stock from scanner to view chart",
     scan["Ticker"].unique()
 )
 
 # =========================
-# CHART
+# ===== CHART AREA (TOP DISPLAYED HERE) =====
 # =========================
+st.markdown("---")
+st.subheader("📈 Stock Chart")
+
 stock_df = data[data["Ticker"] == selected_stock].sort_values("Date")
 
 fig = go.Figure()
 
-# Beautiful TradingView-like candles
 fig.add_trace(go.Candlestick(
     x=stock_df["Date"],
     open=stock_df["Open"],
@@ -192,15 +190,16 @@ fig.add_trace(go.Candlestick(
 ))
 
 # Bollinger
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_UPPER"], name="BB Upper", line=dict(width=1)))
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_MID"], name="BB Mid", line=dict(width=1)))
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_LOWER"], name="BB Lower", line=dict(width=1)))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_UPPER"], name="BB Upper"))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_MID"], name="BB Mid"))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_LOWER"], name="BB Lower"))
 
 fig.update_layout(
     height=650,
     xaxis_rangeslider_visible=False,
-    title=f"{selected_stock} — Pro Chart",
+    title=f"{selected_stock} — Professional Chart",
     template="plotly_dark"
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
