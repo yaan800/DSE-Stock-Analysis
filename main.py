@@ -8,16 +8,14 @@ import plotly.graph_objects as go
 # =========================
 st.set_page_config(layout="wide", page_title="DSE Bollinger Scanner")
 
-EXCEL_FILE = "Test for AI.xlsx"   # put your file in same folder
 BB_WINDOW = 20
 BB_STD = 2
 
 # =========================
 # LOAD DATA
 # =========================
-@st.cache_data
-def load_data():
-    df = pd.read_excel(EXCEL_FILE)
+def load_data(uploaded_file):
+    df = pd.read_excel(uploaded_file)
     df.columns = [c.strip() for c in df.columns]
 
     # Required columns:
@@ -27,10 +25,8 @@ def load_data():
 
     return df
 
-data = load_data()
-
 # =========================
-# BOLLINGER BAND CALCULATION
+# BOLLINGER BAND
 # =========================
 def add_bollinger(df, window=20, std_mult=2):
     df = df.copy()
@@ -44,15 +40,29 @@ def add_bollinger(df, window=20, std_mult=2):
 
     return df
 
+# =========================
+# UI
+# =========================
+st.title("📉 DSE Bollinger Band Scanner (LATEST DAY ONLY)")
+
+uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+
+if uploaded_file is None:
+    st.info("Please upload your Excel file")
+    st.stop()
+
+data = load_data(uploaded_file)
+
+# Add Bollinger per stock
 data = data.groupby("Ticker", group_keys=False).apply(add_bollinger)
 
 # =========================
-# SIDEBAR FILTERS
+# SIDEBAR FILTER
 # =========================
-st.sidebar.header("Scanner Conditions")
+st.sidebar.header("Scanner Condition")
 
 mode = st.sidebar.selectbox(
-    "Condition",
+    "Select condition",
     [
         "Close below Lower Band",
         "Close near Lower Band (within 1%)"
@@ -60,7 +70,7 @@ mode = st.sidebar.selectbox(
 )
 
 # =========================
-# USE ONLY LATEST CANDLE PER STOCK
+# USE ONLY LATEST CANDLE
 # =========================
 latest = (
     data
@@ -71,7 +81,7 @@ latest = (
 )
 
 # =========================
-# APPLY SCAN CONDITION
+# SCAN LOGIC
 # =========================
 if mode == "Close below Lower Band":
     scan = latest[latest["Close"] < latest["BB_LOWER"]]
@@ -83,30 +93,21 @@ elif mode == "Close near Lower Band (within 1%)":
     ]
 
 # =========================
-# UI
+# OUTPUT TABLE
 # =========================
-st.title("📉 DSE Bollinger Band Scanner (LATEST DAY ONLY)")
-
-st.markdown("""
-✅ Scanner checks **ONLY the latest trading day**  
-✅ No historical signals  
-✅ Table = Today's watchlist  
-""")
-
-st.subheader(f"📊 Stocks Matching Condition Today: {len(scan)}")
+st.subheader(f"📊 Stocks Matching Today: {len(scan)}")
 
 if len(scan) == 0:
     st.warning("No stocks match today's condition.")
     st.stop()
 
-# Show table
 show_cols = ["Ticker", "Date", "Close", "BB_LOWER", "BB_MID", "BB_UPPER"]
 st.dataframe(scan[show_cols].reset_index(drop=True), use_container_width=True)
 
 # =========================
-# STOCK SELECTION
+# STOCK SELECTOR
 # =========================
-st.subheader("📈 Click a stock to view chart")
+st.subheader("📈 View Chart")
 
 selected = st.selectbox("Select Stock", scan["Ticker"].unique())
 
@@ -117,7 +118,6 @@ stock_df = data[data["Ticker"] == selected].sort_values("Date")
 
 fig = go.Figure()
 
-# Candles (nice looking)
 fig.add_trace(go.Candlestick(
     x=stock_df["Date"],
     open=stock_df["Open"],
@@ -129,24 +129,9 @@ fig.add_trace(go.Candlestick(
     name="Price"
 ))
 
-# Bollinger Bands
-fig.add_trace(go.Scatter(
-    x=stock_df["Date"], y=stock_df["BB_UPPER"],
-    line=dict(width=1),
-    name="BB Upper"
-))
-
-fig.add_trace(go.Scatter(
-    x=stock_df["Date"], y=stock_df["BB_MID"],
-    line=dict(width=1),
-    name="BB Mid"
-))
-
-fig.add_trace(go.Scatter(
-    x=stock_df["Date"], y=stock_df["BB_LOWER"],
-    line=dict(width=1),
-    name="BB Lower"
-))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_UPPER"], name="BB Upper"))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_MID"], name="BB Mid"))
+fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_LOWER"], name="BB Lower"))
 
 fig.update_layout(
     height=600,
