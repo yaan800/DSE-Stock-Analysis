@@ -10,7 +10,7 @@ try:
     use_aggrid = True
 except ImportError:
     use_aggrid = False
-    st.warning("st-aggrid not found. Table selection will fallback to st.dataframe.")
+    st.warning("st-aggrid not found. Using basic dataframe table instead.")
 
 st.set_page_config(layout="wide", page_title="DSE Pro Stock Analyzer")
 
@@ -23,6 +23,7 @@ BB_STD = 2
 # =========================
 # LOAD EXCEL DATA
 # =========================
+@st.cache_data
 def load_excel_data(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
     all_rows = []
@@ -40,7 +41,6 @@ def load_excel_data(uploaded_file):
         for col in ["Open","High","Low","Close","Volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-
         df = df[df["Ticker"].notna() & df["Close"].notna() & df["Date"].notna()]
         if not df.empty:
             all_rows.append(df)
@@ -49,69 +49,70 @@ def load_excel_data(uploaded_file):
         st.error("No valid stock data found in Excel.")
         st.stop()
 
-    full_df = pd.concat(all_rows, ignore_index=True).sort_values(["Ticker","Date"])
+    full_df = pd.concat(all_rows, ignore_index=True)
+    # Limit to last 2 years for speed
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=365*2)
+    full_df = full_df[full_df['Date'] >= cutoff].sort_values(["Ticker","Date"])
     return full_df
 
 # =========================
-# ADD INDICATORS
+# ADD INDICATORS VECTORIAL
 # =========================
-def add_indicators(df):
-    df = df.sort_values("Date").copy()
-
-    # Bollinger Bands
-    ma = df["Close"].rolling(BB_WINDOW, min_periods=BB_WINDOW).mean()
-    std = df["Close"].rolling(BB_WINDOW, min_periods=BB_WINDOW).std(ddof=0)
-    df["BB_MID"] = ma
-    df["BB_UPPER"] = ma + BB_STD * std
-    df["BB_LOWER"] = ma - BB_STD * std
+@st.cache_data
+def add_indicators_vectorized(df):
+    df = df.sort_values(["Ticker","Date"]).copy()
+    grouped = df.groupby('Ticker', group_keys=False)
 
     # Moving averages
-    df["MA50"] = df["Close"].rolling(50, min_periods=50).mean()
-    df["MA150"] = df["Close"].rolling(150, min_periods=150).mean()
-    df["MA200"] = df["Close"].rolling(200, min_periods=200).mean()
+    df['MA50'] = grouped['Close'].transform(lambda x: x.rolling(50, min_periods=50).mean())
+    df['MA150'] = grouped['Close'].transform(lambda x: x.rolling(150, min_periods=150).mean())
+    df['MA200'] = grouped['Close'].transform(lambda x: x.rolling(200, min_periods=200).mean())
 
-    # Stage 2 condition
-    df["Stage2"] = (
-        (df["Close"] > df["MA50"]) &
-        (df["MA50"] > df["MA150"]) &
-        (df["MA150"] > df["MA200"])
-    )
+    # Bollinger Bands
+    ma20 = grouped['Close'].transform(lambda x: x.rolling(BB_WINDOW, min_periods=BB_WINDOW).mean())
+    std20 = grouped['Close'].transform(lambda x: x.rolling(BB_WINDOW, min_periods=BB_WINDOW).std(ddof=0))
+    df['BB_MID'] = ma20
+    df['BB_UPPER'] = ma20 + BB_STD * std20
+    df['BB_LOWER'] = ma20 - BB_STD * std20
 
-    # Volume expansion & Pocket Pivot
-    df["VOL_AVG20"] = df["Volume"].rolling(20).mean()
-    df["VolumeExpansion"] = df["Volume"] > df["VOL_AVG20"] * 1.5
-    df["PocketPivot"] = (
-        (df["Close"] > df["MA50"]) &
-        (df["Volume"] > df["VOL_AVG20"] * 1.2) &
-        (df["Close"].pct_change() < 0.03)
-    )
+    # Stage 2
+    df['Stage2'] = (df['Close'] > df['MA50']) & (df['MA50'] > df['MA150']) & (df['MA150'] > df['MA200'])
 
-    # Breakout: 20-day high
-    df["HH20"] = df["Close"].rolling(20, min_periods=20).max()
-    df["Breakout"] = df["Close"] >= df["HH20"]
+    # Volume averages
+    df['VOL_AVG20'] = grouped['Volume'].transform(lambda x: x.rolling(20, min_periods=20).mean())
+    df['VolumeExpansion'] = df['Volume'] > df['VOL_AVG20'] * 1.5
+    df['PocketPivot'] = (df['Close'] > df['MA50']) & (df['Volume'] > df['VOL_AVG20']*1.2) & (df['Close'].pct_change() < 0.03)
 
-    # Relative Strength (RS Rating) 3-month
-    df["RS_63"] = df["Close"].pct_change(63)
+    # Breakout 20-day high
+    df['HH20'] = grouped['Close'].transform(lambda x: x.rolling(20, min_periods=20).max())
+    df['Breakout'] = df['Close'] >= df['HH20']
 
-    # Basic VCP detection (contracting peaks)
-    peaks, _ = find_peaks(df['Close'], distance=5)
-    df['VCP'] = False
-    if len(peaks) > 2:
-        highs = df['Close'].iloc[peaks]
-        df.loc[df.index[peaks[-1]], 'VCP'] = highs.diff().iloc[-1] < 0
+    # RS 3-month (~63 trading days)
+    df['RS_63'] = grouped['Close'].transform(lambda x: x.pct_change(63))
 
     return df
 
 # =========================
+# VCP Detection (selected stock only)
+# =========================
+def detect_vcp(stock_df):
+    peaks, _ = find_peaks(stock_df['Close'], distance=5)
+    stock_df['VCP'] = False
+    if len(peaks) > 2:
+        highs = stock_df['Close'].iloc[peaks]
+        stock_df.loc[stock_df.index[peaks[-1]], 'VCP'] = highs.diff().iloc[-1] < 0
+    return stock_df
+
+# =========================
 # APP HEADER
 # =========================
-st.title("📊 DSE Pro Stock Analyzer - Professional Edition")
+st.title("📊 DSE Pro Stock Analyzer - Optimized Edition")
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 if uploaded_file is None:
     st.stop()
 
 data = load_excel_data(uploaded_file)
-data = data.groupby("Ticker", group_keys=False).apply(add_indicators)
+data = add_indicators_vectorized(data)
 
 # =========================
 # LATEST DAY SCANNER
@@ -136,19 +137,14 @@ if bb_mode == "Below Lower Band":
 elif bb_mode == "Near Lower Band (1%)":
     scan = scan[(scan["Close"] >= scan["BB_LOWER"]) & (scan["Close"] <= scan["BB_LOWER"]*1.01)]
 if require_stage2:
-    scan = scan[scan["Stage2"]==True]
+    scan = scan[scan['Stage2']]
 if require_breakout:
-    scan = scan[scan["Breakout"]==True]
+    scan = scan[scan['Breakout']]
 if require_pp:
-    scan = scan[scan["PocketPivot"]==True]
+    scan = scan[scan['PocketPivot']]
 
-# Auto ranking system
-scan['Score'] = (
-    scan['Stage2'].astype(int)*3 +
-    scan['Breakout'].astype(int)*2 +
-    scan['PocketPivot'].astype(int)*2 +
-    scan['RS_63'].rank(ascending=False)
-)
+# Auto-ranking
+scan['Score'] = scan['Stage2'].astype(int)*3 + scan['Breakout'].astype(int)*2 + scan['PocketPivot'].astype(int)*2 + scan['RS_63'].rank(ascending=False)
 scan = scan.sort_values('Score', ascending=False)
 
 st.markdown(f"### 📋 Stocks Found: {len(scan)}")
@@ -161,6 +157,7 @@ if len(scan)==0:
 # =========================
 show_cols = ["Ticker","Close","Stage2","VolumeExpansion","PocketPivot","Breakout","RS_63","Score"]
 if use_aggrid:
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
     gb = GridOptionsBuilder.from_dataframe(scan[show_cols])
     gb.configure_selection('single')
     grid_options = gb.build()
@@ -172,11 +169,12 @@ else:
     selected_stock = scan.iloc[0]['Ticker']
 
 # =========================
-# STOCK CHART
+# SELECTED STOCK CHART
 # =========================
 st.markdown("---")
 st.subheader(f"📈 {selected_stock} Chart")
-stock_df = data[data["Ticker"]==selected_stock].sort_values("Date")
+stock_df = data[data['Ticker']==selected_stock].sort_values("Date")
+stock_df = detect_vcp(stock_df)
 
 fig = go.Figure()
 fig.add_trace(go.Candlestick(
@@ -216,15 +214,13 @@ n_stocks = st.slider("Top N Stocks to Include", 1, min(10,len(scan)), value=5)
 
 portfolio = scan.head(n_stocks).copy()
 portfolio['Investment'] = capital / n_stocks
-
-# Compute returns
 returns = []
+
 for ticker in portfolio['Ticker']:
     df = data[data['Ticker']==ticker].sort_values("Date")
     ret = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
     returns.append(ret)
 portfolio['Return'] = returns
-portfolio['PortfolioValue'] = portfolio['Investment'] * (1 + portfolio['Return'])
-total_portfolio_value = portfolio['PortfolioValue'].sum()
+portfolio['PortfolioValue'] = portfolio['Investment']*(1+portfolio['Return'])
 st.write(portfolio[['Ticker','Return','PortfolioValue']])
-st.metric("Total Portfolio Value", f"{total_portfolio_value:,.2f} BDT")
+st.metric("Total Portfolio Value", f"{portfolio['PortfolioValue'].sum():,.2f} BDT")
