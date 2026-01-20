@@ -154,14 +154,15 @@ if cond_near:
 
 # Keep only signaled rows
 scan = scan[scan["Signal"] != ""]
-
-# Latest signal per stock
+# --- Use ONLY latest candle per stock
 scan = (
-    scan
-    .sort_values("Date", ascending=False)
+    data
+    .sort_values("Date")
     .groupby("Ticker")
-    .head(1)
+    .tail(1)
+    .copy()
 )
+
 
 # ------------------------------
 # Display table
