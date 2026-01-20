@@ -58,11 +58,19 @@ def load_excel_data(uploaded_file):
 # -------------------------------------------------
 def add_bollinger(df, window=20):
     df = df.sort_values("Date").copy()
-    df["BB_MID"] = df["Close"].rolling(window).mean()
-    df["BB_STD"] = df["Close"].rolling(window).std()
-    df["BB_UPPER"] = df["BB_MID"] + 2 * df["BB_STD"]
-    df["BB_LOWER"] = df["BB_MID"] - 2 * df["BB_STD"]
+
+    # Use close only
+    close = df["Close"]
+
+    mid = close.rolling(window=window, min_periods=window).mean()
+    std = close.rolling(window=window, min_periods=window).std(ddof=0)
+
+    df["BB_MID"] = mid
+    df["BB_UPPER"] = mid + 2 * std
+    df["BB_LOWER"] = mid - 2 * std
+
     return df
+
 
 
 # -------------------------------------------------
