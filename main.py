@@ -1,35 +1,61 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 
-# =========================
-# CONFIG
-# =========================
 st.set_page_config(layout="wide", page_title="DSE Bollinger Scanner")
 
 BB_WINDOW = 20
 BB_STD = 2
 
 # =========================
-# LOAD DATA
+# LOAD YOUR EXACT EXCEL FORMAT
 # =========================
-def load_data(uploaded_file):
-    df = pd.read_excel(uploaded_file)
-    df.columns = [c.strip() for c in df.columns]
+def load_excel_data(uploaded_file):
+    xls = pd.ExcelFile(uploaded_file)
 
-    # Required columns:
-    # Ticker, Date, Open, High, Low, Close, Volume
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values(["Ticker", "Date"])
+    all_rows = []
 
-    return df
+    for sheet in xls.sheet_names:
+        # Skip the stock name reference sheet
+        if sheet.lower().startswith("stock"):
+            continue
+
+        df = pd.read_excel(xls, sheet_name=sheet, header=None)
+
+        # Must have at least 7 columns
+        if df.shape[1] < 7:
+            continue
+
+        df = df.iloc[:, 0:7].copy()
+        df.columns = ["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"]
+
+        df["Ticker"] = df["Ticker"].astype(str).str.strip()
+        df["Open"] = pd.to_numeric(df["Open"], errors="coerce")
+        df["High"] = pd.to_numeric(df["High"], errors="coerce")
+        df["Low"] = pd.to_numeric(df["Low"], errors="coerce")
+        df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+        df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+        df = df[df["Ticker"].notna() & df["Close"].notna() & df["Date"].notna()]
+
+        if not df.empty:
+            all_rows.append(df)
+
+    if not all_rows:
+        st.error("No valid stock data found in Excel.")
+        st.stop()
+
+    full_df = pd.concat(all_rows, ignore_index=True)
+    full_df = full_df.sort_values(["Ticker", "Date"])
+
+    return full_df
 
 # =========================
-# BOLLINGER BAND
+# BOLLINGER
 # =========================
 def add_bollinger(df, window=20, std_mult=2):
-    df = df.copy()
+    df = df.sort_values("Date").copy()
 
     ma = df["Close"].rolling(window=window, min_periods=window).mean()
     std = df["Close"].rolling(window=window, min_periods=window).std(ddof=0)
@@ -43,7 +69,7 @@ def add_bollinger(df, window=20, std_mult=2):
 # =========================
 # UI
 # =========================
-st.title("📉 DSE Bollinger Band Scanner (LATEST DAY ONLY)")
+st.title("📉 DSE Bollinger Band Scanner (Latest Day Only)")
 
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 
@@ -51,7 +77,7 @@ if uploaded_file is None:
     st.info("Please upload your Excel file")
     st.stop()
 
-data = load_data(uploaded_file)
+data = load_excel_data(uploaded_file)
 
 # Add Bollinger per stock
 data = data.groupby("Ticker", group_keys=False).apply(add_bollinger)
@@ -70,7 +96,7 @@ mode = st.sidebar.selectbox(
 )
 
 # =========================
-# USE ONLY LATEST CANDLE
+# USE ONLY LATEST DAY PER STOCK
 # =========================
 latest = (
     data
@@ -81,7 +107,7 @@ latest = (
 )
 
 # =========================
-# SCAN LOGIC
+# SCAN
 # =========================
 if mode == "Close below Lower Band":
     scan = latest[latest["Close"] < latest["BB_LOWER"]]
@@ -93,7 +119,7 @@ elif mode == "Close near Lower Band (within 1%)":
     ]
 
 # =========================
-# OUTPUT TABLE
+# TABLE
 # =========================
 st.subheader(f"📊 Stocks Matching Today: {len(scan)}")
 
@@ -105,7 +131,7 @@ show_cols = ["Ticker", "Date", "Close", "BB_LOWER", "BB_MID", "BB_UPPER"]
 st.dataframe(scan[show_cols].reset_index(drop=True), use_container_width=True)
 
 # =========================
-# STOCK SELECTOR
+# SELECT STOCK
 # =========================
 st.subheader("📈 View Chart")
 
@@ -124,8 +150,8 @@ fig.add_trace(go.Candlestick(
     high=stock_df["High"],
     low=stock_df["Low"],
     close=stock_df["Close"],
-    increasing_line_width=1.5,
-    decreasing_line_width=1.5,
+    increasing_line_width=1.4,
+    decreasing_line_width=1.4,
     name="Price"
 ))
 
