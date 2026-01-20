@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(layout="wide", page_title="DSE Bollinger Scanner")
+st.set_page_config(layout="wide", page_title="DSE Stock Analyzer")
 
 BB_WINDOW = 20
 BB_STD = 2
@@ -16,13 +16,11 @@ def load_excel_data(uploaded_file):
     all_rows = []
 
     for sheet in xls.sheet_names:
-        # Skip the stock name reference sheet
         if sheet.lower().startswith("stock"):
             continue
 
         df = pd.read_excel(xls, sheet_name=sheet, header=None)
 
-        # Must have at least 7 columns
         if df.shape[1] < 7:
             continue
 
@@ -69,34 +67,88 @@ def add_bollinger(df, window=20, std_mult=2):
 # =========================
 # UI
 # =========================
-st.title("📉 DSE Bollinger Band Scanner (Latest Day Only)")
+st.title("📊 DSE Stock Analyzer")
 
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 
 if uploaded_file is None:
-    st.info("Please upload your Excel file")
     st.stop()
 
 data = load_excel_data(uploaded_file)
-
-# Add Bollinger per stock
 data = data.groupby("Ticker", group_keys=False).apply(add_bollinger)
 
 # =========================
-# SIDEBAR FILTER
+# ======= TOP SECTION =====
 # =========================
-st.sidebar.header("Scanner Condition")
 
-mode = st.sidebar.selectbox(
-    "Select condition",
-    [
-        "Close below Lower Band",
-        "Close near Lower Band (within 1%)"
-    ]
+st.subheader("📈 Stock Chart")
+
+stock_list = sorted(data["Ticker"].unique())
+selected_stock = st.selectbox("Select Stock", stock_list)
+
+stock_df = data[data["Ticker"] == selected_stock].sort_values("Date")
+
+# ---- Chart ----
+fig = go.Figure()
+
+fig.add_trace(go.Candlestick(
+    x=stock_df["Date"],
+    open=stock_df["Open"],
+    high=stock_df["High"],
+    low=stock_df["Low"],
+    close=stock_df["Close"],
+    increasing_line_width=1.6,
+    decreasing_line_width=1.6,
+    name="Price"
+))
+
+fig.add_trace(go.Scatter(
+    x=stock_df["Date"], y=stock_df["BB_UPPER"],
+    name="BB Upper", line=dict(width=1)
+))
+
+fig.add_trace(go.Scatter(
+    x=stock_df["Date"], y=stock_df["BB_MID"],
+    name="BB Mid", line=dict(width=1)
+))
+
+fig.add_trace(go.Scatter(
+    x=stock_df["Date"], y=stock_df["BB_LOWER"],
+    name="BB Lower", line=dict(width=1)
+))
+
+fig.update_layout(
+    height=600,
+    xaxis_rangeslider_visible=False,
+    title=f"{selected_stock} — Candlestick with Bollinger Bands"
 )
 
+st.plotly_chart(fig, use_container_width=True)
+
 # =========================
-# USE ONLY LATEST DAY PER STOCK
+# ===== SCANNER SECTION ===
+# =========================
+
+st.markdown("---")
+st.subheader("🔍 Bollinger Band Scanner (Latest Day Only)")
+
+# ---- Filters ----
+c1, c2 = st.columns(2)
+
+with c1:
+    mode = st.selectbox(
+        "Scan Condition",
+        [
+            "Close below Lower Band",
+            "Close near Lower Band (within 1%)"
+        ]
+    )
+
+with c2:
+    near_pct = st.number_input("Near % (for 2nd option)", value=1.0, step=0.1)
+
+# =========================
+# ONLY LATEST DAY PER STOCK
 # =========================
 latest = (
     data
@@ -107,62 +159,24 @@ latest = (
 )
 
 # =========================
-# SCAN
+# SCAN LOGIC
 # =========================
 if mode == "Close below Lower Band":
     scan = latest[latest["Close"] < latest["BB_LOWER"]]
 
-elif mode == "Close near Lower Band (within 1%)":
+else:
     scan = latest[
         (latest["Close"] >= latest["BB_LOWER"]) &
-        (latest["Close"] <= latest["BB_LOWER"] * 1.01)
+        (latest["Close"] <= latest["BB_LOWER"] * (1 + near_pct / 100))
     ]
 
 # =========================
-# TABLE
+# RESULT TABLE
 # =========================
-st.subheader(f"📊 Stocks Matching Today: {len(scan)}")
+st.markdown(f"### 📋 Stocks Matching Today: {len(scan)}")
 
 if len(scan) == 0:
-    st.warning("No stocks match today's condition.")
-    st.stop()
-
-show_cols = ["Ticker", "Date", "Close", "BB_LOWER", "BB_MID", "BB_UPPER"]
-st.dataframe(scan[show_cols].reset_index(drop=True), use_container_width=True)
-
-# =========================
-# SELECT STOCK
-# =========================
-st.subheader("📈 View Chart")
-
-selected = st.selectbox("Select Stock", scan["Ticker"].unique())
-
-# =========================
-# CHART
-# =========================
-stock_df = data[data["Ticker"] == selected].sort_values("Date")
-
-fig = go.Figure()
-
-fig.add_trace(go.Candlestick(
-    x=stock_df["Date"],
-    open=stock_df["Open"],
-    high=stock_df["High"],
-    low=stock_df["Low"],
-    close=stock_df["Close"],
-    increasing_line_width=1.4,
-    decreasing_line_width=1.4,
-    name="Price"
-))
-
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_UPPER"], name="BB Upper"))
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_MID"], name="BB Mid"))
-fig.add_trace(go.Scatter(x=stock_df["Date"], y=stock_df["BB_LOWER"], name="BB Lower"))
-
-fig.update_layout(
-    height=600,
-    xaxis_rangeslider_visible=False,
-    title=f"{selected} - Candlestick with Bollinger Bands"
-)
-
-st.plotly_chart(fig, use_container_width=True)
+    st.warning("No stocks match the condition today.")
+else:
+    show_cols = ["Ticker", "Date", "Close", "BB_LOWER", "BB_MID", "BB_UPPER", "Volume"]
+    st.dataframe(scan[show_cols].sort_values("Ticker"), use_container_width=True)
