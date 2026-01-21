@@ -68,7 +68,7 @@ def add_indicators(df):
     )
 
     # Touch lower band
-    df["TOUCH_LOWER_BB"] = df["Close"] <= df["BB_LOWER"]
+    df["TOUCH_LOWER_BB"] = df["Low"] <= df["BB_LOWER"]
 
     # BB Expansion
     df["BB_EXPANSION"] = df["BB_WIDTH"] > df["BB_WIDTH"].shift(1) * 1.3
