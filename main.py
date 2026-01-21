@@ -1,25 +1,27 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(
-    page_title="DSE Pro Stock Analyzer",
-    layout="wide"
-)
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+st.set_page_config(layout="wide", page_title="DSE Bollinger Scanner Pro")
 
 BB_WINDOW = 20
 BB_STD = 2
 
+
 # =========================
-# LOAD EXCEL
+# LOAD EXCEL (ROBUST)
 # =========================
 @st.cache_data
-def load_excel_data(uploaded_file):
-    xls = pd.ExcelFile(uploaded_file)
-    frames = []
+def load_excel(file):
+    xls = pd.ExcelFile(file)
+    all_data = []
 
     for sheet in xls.sheet_names:
         df = pd.read_excel(xls, sheet_name=sheet, header=None)
+
         if df.shape[1] < 7:
             continue
 
@@ -28,225 +30,158 @@ def load_excel_data(uploaded_file):
 
         df["Ticker"] = df["Ticker"].astype(str).str.strip()
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        for c in ["Open", "High", "Low", "Close", "Volume"]:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-        df = df.dropna(subset=["Ticker", "Date", "Close"])
-        frames.append(df)
+        for col in ["Open", "High", "Low", "Close", "Volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    if not frames:
-        st.error("No valid stock data found.")
-        st.stop()
+        df.dropna(subset=["Date", "Close"], inplace=True)
+        df.sort_values("Date", inplace=True)
 
-    df = pd.concat(frames, ignore_index=True)
-    df = df.sort_values(["Ticker", "Date"])
-    return df
+        all_data.append(df)
+
+    return pd.concat(all_data, ignore_index=True)
+
 
 # =========================
-# INDICATORS
+# BOLLINGER BANDS
 # =========================
-def add_indicators(df):
-    df = df.sort_values("Date").copy()
-
-    # Bollinger Bands
-    ma = df["Close"].rolling(BB_WINDOW).mean()
-    std = df["Close"].rolling(BB_WINDOW).std(ddof=0)
-
-    df["BB_MID"] = ma
-    df["BB_UPPER"] = ma + BB_STD * std
-    df["BB_LOWER"] = ma - BB_STD * std
-
-    # BB Width
-    df["BB_WIDTH"] = (df["BB_UPPER"] - df["BB_LOWER"]) / df["BB_MID"]
-
-    # BB Squeeze (lowest 10% of last 120 days)
-    df["BB_SQUEEZE"] = (
-        df["BB_WIDTH"]
-        <= df["BB_WIDTH"]
-        .rolling(120, min_periods=50)
-        .quantile(0.10)
-    )
-
-    # Touch lower band
-    df["TOUCH_LOWER_BB"] = df["Low"] <= df["BB_LOWER"]
-
-    # BB Expansion
-    df["BB_EXPANSION"] = df["BB_WIDTH"] > df["BB_WIDTH"].shift(1) * 1.3
-
-    # BB Breakout (after squeeze)
-    df["BB_BREAKOUT"] = (
-        df["BB_EXPANSION"]
-        & (df["Close"] > df["BB_UPPER"])
-        & df["BB_SQUEEZE"].shift(1)
-    )
-
-    # Moving Averages
-    df["MA50"] = df["Close"].rolling(50).mean()
-    df["MA150"] = df["Close"].rolling(150).mean()
-    df["MA200"] = df["Close"].rolling(200).mean()
-
-    # Stage 2
-    df["STAGE2"] = (
-        (df["Close"] > df["MA50"]) &
-        (df["MA50"] > df["MA150"]) &
-        (df["MA150"] > df["MA200"])
-    )
-
+def add_bollinger(df):
+    df = df.copy()
+    df["BB_MID"] = df["Close"].rolling(BB_WINDOW).mean()
+    df["BB_STD"] = df["Close"].rolling(BB_WINDOW).std()
+    df["BB_UPPER"] = df["BB_MID"] + BB_STD * df["BB_STD"]
+    df["BB_LOWER"] = df["BB_MID"] - BB_STD * df["BB_STD"]
     return df
+
+
+# =========================
+# SCANNER (LATEST DAY ONLY)
+# =========================
+def bollinger_scanner(data, mode):
+    rows = []
+
+    for ticker, df in data.groupby("Ticker"):
+        if len(df) < BB_WINDOW:
+            continue
+
+        df = add_bollinger(df)
+        latest = df.iloc[-1]
+
+        low = latest["Low"]
+        close = latest["Close"]
+        bb_lower = latest["BB_LOWER"]
+
+        signal = None
+
+        if mode == "Touch / Below Lower Band":
+            if low <= bb_lower:
+                signal = "LOW Touch Lower Band"
+
+        elif mode == "Near Lower Band (1%)":
+            if low <= bb_lower * 1.01:
+                signal = "LOW Near Lower Band"
+
+        if signal:
+            rows.append({
+                "Ticker": ticker,
+                "Date": latest["Date"].date(),
+                "Low": round(low, 2),
+                "Close": round(close, 2),
+                "BB_Lower": round(bb_lower, 2),
+                "Signal": signal
+            })
+
+    return pd.DataFrame(rows)
+
 
 # =========================
 # UI
 # =========================
-st.title("📊 DSE Professional Stock Analyzer")
+st.title("📊 DSE Bollinger Band Scanner (LOW-Based)")
 
-uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
-if uploaded_file is None:
-    st.stop()
+uploaded_file = st.file_uploader("Upload DSE Excel File", type=["xlsx"])
 
-data = load_excel_data(uploaded_file)
-data = data.groupby("Ticker", group_keys=False).apply(add_indicators)
+if uploaded_file:
+    data = load_excel(uploaded_file)
 
-# =========================
-# TRUE IBD RS (1–99)
-# =========================
-data["RET_252"] = data.groupby("Ticker")["Close"].pct_change(252)
+    # -------------------------
+    # UPPER: CHART
+    # -------------------------
+    st.subheader("📈 Candlestick Chart")
 
-latest = (
-    data.sort_values("Date")
-    .groupby("Ticker")
-    .tail(1)
-    .copy()
-)
+    tickers = sorted(data["Ticker"].unique())
+    selected_stock = st.selectbox("Select Stock", tickers)
 
-latest["RS_RATING"] = (
-    latest["RET_252"]
-    .rank(pct=True)
-    .mul(99)
-    .round()
-)
+    stock_df = data[data["Ticker"] == selected_stock].copy()
+    stock_df = add_bollinger(stock_df)
 
-# =========================
-# SCANNER
-# =========================
-st.markdown("---")
-st.subheader("🔍 Smart Scanner (Latest Day)")
+    fig = go.Figure()
 
-c1, c2, c3, c4 = st.columns(4)
+    # Clean OHLC (better wicks)
+    fig.add_trace(go.Ohlc(
+        x=stock_df["Date"],
+        open=stock_df["Open"],
+        high=stock_df["High"],
+        low=stock_df["Low"],
+        close=stock_df["Close"],
+        increasing_line_color="#00ff88",
+        decreasing_line_color="#ff4d4d",
+        line_width=1,
+        name="Price"
+    ))
 
-with c1:
-    f_squeeze = st.checkbox("BB Squeeze")
+    # Bollinger Bands
+    fig.add_trace(go.Scatter(
+        x=stock_df["Date"], y=stock_df["BB_UPPER"],
+        line=dict(width=1), name="BB Upper"
+    ))
+    fig.add_trace(go.Scatter(
+        x=stock_df["Date"], y=stock_df["BB_MID"],
+        line=dict(width=1), name="BB Mid"
+    ))
+    fig.add_trace(go.Scatter(
+        x=stock_df["Date"], y=stock_df["BB_LOWER"],
+        line=dict(width=1), name="BB Lower"
+    ))
 
-with c2:
-    f_touch = st.checkbox("Touch Lower BB")
+    fig.update_layout(
+        template="plotly_dark",
+        height=650,
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=10, r=10, t=30, b=10)
+    )
 
-with c3:
-    f_breakout = st.checkbox("BB Expansion Breakout")
+    st.plotly_chart(fig, use_container_width=True)
 
-with c4:
-    f_rs90 = st.checkbox("RS ≥ 90")
+    # -------------------------
+    # LOWER: SCANNER
+    # -------------------------
+    st.subheader("🔍 Bollinger Band Scanner (Latest LOW Only)")
 
-scan = latest.copy()
+    scan_mode = st.selectbox(
+        "Scanner Condition",
+        [
+            "Touch / Below Lower Band",
+            "Near Lower Band (1%)"
+        ]
+    )
 
-if f_squeeze:
-    scan = scan[scan["BB_SQUEEZE"]]
+    scan_df = bollinger_scanner(data, scan_mode)
 
-if f_touch:
-    scan = scan[scan["TOUCH_LOWER_BB"]]
+    if scan_df.empty:
+        st.info("No stocks matched the condition today.")
+    else:
+        gb = GridOptionsBuilder.from_dataframe(scan_df)
+        gb.configure_selection("single", use_checkbox=False)
+        gb.configure_default_column(filter=True, sortable=True)
+        grid = AgGrid(
+            scan_df,
+            gridOptions=gb.build(),
+            height=300,
+            theme="streamlit"
+        )
 
-if f_breakout:
-    scan = scan[scan["BB_BREAKOUT"]]
-
-if f_rs90:
-    scan = scan[scan["RS_RATING"] >= 90]
-
-st.markdown(f"### 📋 Stocks Found: {len(scan)}")
-
-if scan.empty:
-    st.warning("No stocks match your filters.")
-    st.stop()
-
-display_cols = [
-    "Ticker", "Close",
-    "RS_RATING",
-    "BB_SQUEEZE",
-    "TOUCH_LOWER_BB",
-    "BB_BREAKOUT",
-    "STAGE2"
-]
-
-st.dataframe(
-    scan[display_cols].sort_values("Ticker"),
-    use_container_width=True
-)
-
-# =========================
-# CLICK → CHART
-# =========================
-selected_stock = st.selectbox(
-    "📌 Select stock to view chart",
-    scan["Ticker"].unique()
-)
-
-# =========================
-# CHART
-# =========================
-st.markdown("---")
-st.subheader(f"📈 {selected_stock}")
-
-df = data[data["Ticker"] == selected_stock].dropna(subset=["BB_MID"])
-
-fig = go.Figure()
-
-# Candles (clean)
-fig.add_trace(go.Candlestick(
-    x=df["Date"],
-    open=df["Open"],
-    high=df["High"],
-    low=df["Low"],
-    close=df["Close"],
-    line=dict(width=0.7),
-    whiskerwidth=0.4,
-    increasing_line_color="#00ff99",
-    decreasing_line_color="#ff4d4d",
-    name="Price"
-))
-
-# Bollinger Bands
-fig.add_trace(go.Scatter(
-    x=df["Date"], y=df["BB_UPPER"],
-    line=dict(color="rgba(255,255,255,0.35)", width=1),
-    name="BB Upper"
-))
-fig.add_trace(go.Scatter(
-    x=df["Date"], y=df["BB_MID"],
-    line=dict(color="rgba(255,255,255,0.6)", width=1, dash="dot"),
-    name="BB Mid"
-))
-fig.add_trace(go.Scatter(
-    x=df["Date"], y=df["BB_LOWER"],
-    line=dict(color="rgba(255,255,255,0.35)", width=1),
-    name="BB Lower"
-))
-
-# Moving averages
-fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], name="MA50"))
-fig.add_trace(go.Scatter(x=df["Date"], y=df["MA150"], name="MA150"))
-fig.add_trace(go.Scatter(x=df["Date"], y=df["MA200"], name="MA200"))
-
-# BB Breakout markers
-bo = df[df["BB_BREAKOUT"]]
-fig.add_trace(go.Scatter(
-    x=bo["Date"],
-    y=bo["Close"],
-    mode="markers",
-    marker=dict(size=10, color="cyan"),
-    name="BB Breakout"
-))
-
-fig.update_layout(
-    height=650,
-    xaxis_rangeslider_visible=False,
-    template="plotly_dark"
-)
-
-st.plotly_chart(fig, use_container_width=True)
+        # Click → auto-load chart
+        if grid["selected_rows"]:
+            clicked = grid["selected_rows"][0]["Ticker"]
+            st.experimental_set_query_params(ticker=clicked)
